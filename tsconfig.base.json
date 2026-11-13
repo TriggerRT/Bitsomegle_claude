@@ -1,0 +1,29 @@
+{
+  // Shared TypeScript settings. Each package extends this file.
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+
+    // Strictness: catch mistakes at compile time instead of at runtime.
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+
+    // Write imports as './file.ts'; the compiler rewrites them to './file.js' in dist/.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+
+    // Resolve '@bitsomeggle/shared' to its TypeScript source during development
+    // (see the "source" entry in packages/shared/package.json).
+    "customConditions": ["source"],
+
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true
+  }
+}

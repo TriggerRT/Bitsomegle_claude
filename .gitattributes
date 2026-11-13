@@ -1,0 +1,5 @@
+# Store text files with LF line endings so Windows and Linux (CI, Render) agree
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.zip binary

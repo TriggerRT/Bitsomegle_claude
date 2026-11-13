@@ -1,0 +1,13 @@
+{
+  // Used by `npm run build`: compiles src/ to dist/ for production (`npm start`).
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "sourceMap": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    // In production, use the compiled shared package (dist/), not its TypeScript source.
+    "customConditions": []
+  },
+  "include": ["src"]
+}

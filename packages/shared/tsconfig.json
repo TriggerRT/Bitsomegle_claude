@@ -1,0 +1,8 @@
+{
+  // Used by the editor and `npm run typecheck`: checks source and tests, emits nothing.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": []
+  },
+  "include": ["src", "test"]
+}

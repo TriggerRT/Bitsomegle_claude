@@ -1,0 +1,29 @@
+# Dependencies and build output (anywhere in the repo)
+node_modules/
+dist/
+.next/
+coverage/
+*.tsbuildinfo
+
+# Secrets: never commit real env files (examples are fine)
+.env
+.env.*
+!.env.example
+# Old code contains a real leaked secret in .env.local files and an app zip
+reference/**/.env*
+reference/**/*.zip
+# This old project is its own git repo (has a .git folder), so git cannot include its
+# files here. It stays on disk for reading; it is just not tracked.
+reference/omegle_2027/app-8fdlxwxjrytd/
+
+# Test artefacts
+playwright-report/
+test-results/
+
+# Local tool settings and OS/editor junk
+.claude/settings.local.json
+*.log
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
