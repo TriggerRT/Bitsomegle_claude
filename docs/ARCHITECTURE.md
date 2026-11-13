@@ -122,10 +122,11 @@ With session IDs: the server drops any event whose `sessionId` isn't the sender'
 Returning effects instead of emitting means the matchmaking logic can be tested with plain function calls. No real sockets are needed.
 
 ### 3.2 Matchmaking state
+_Implemented in M1: `apps/server/src/matchmaking/`._
 ```ts
-clients:  Map<ClientId, { state: 'idle' | 'waiting' | 'in_session', sessionId?: string, lastPartner?: ClientId, avoid: Set<ClientId> }>
+clients:  Map<ClientId, { id, state: 'idle' | 'waiting' | 'in_session', sessionId: string | null, lastPartner: ClientId | null, avoid: Set<ClientId> }>
 queue:    Set<ClientId>        // JS Sets keep insertion order → first-in-first-out, O(1) delete
-sessions: Map<SessionId, { a: ClientId, b: ClientId, startedAt: number }>
+sessions: Map<SessionId, { id, a: ClientId, b: ClientId }>
 ```
 `ClientId` is the server-side socket id. It is **never sent to other clients**.
 
@@ -136,16 +137,24 @@ sessions: Map<SessionId, { a: ClientId, b: ClientId, startedAt: number }>
 4. Every session has **exactly two distinct** members, and both point back to it.
 5. Nobody is matched with themselves.
 6. Ending a session updates **both** members in the same synchronous step.
+7. No two clients are left waiting if they could be matched with each other.
+
+`Matchmaker.assertInvariants()` checks all of these. Tests call it after every operation.
 
 ### 3.4 Operations
+Every operation returns a list of **effects**: `waiting`, `matched{sessionId, polite}` or `session_ended{sessionId, reason}`, each addressed to one client. An operation on a client id the Matchmaker doesn't know does nothing.
+
 | Operation | Behavior |
 |---|---|
-| `connect(c)` | Register as `idle` |
+| `connect(c)` | Register as `idle`. A second connect for the same id is a no-op |
 | `join(c)` | If already `waiting` or `in_session` → no-op (idempotent: duplicate clicks or events are harmless). Otherwise `findPartner`; if found → create session; else → enqueue |
-| `next(c, sessionId)` | If `sessionId` is c's current session → end it (partner gets `session:ended{reason:'partner_next'}` and becomes `idle`). **Then** ensure c is queued / matched (same as `join`). If `sessionId` is stale → just `join(c)`. So if both press Next at once: the first Next ends the session, the second just queues that user |
-| `leave(c, sessionId?)` | End current session if it matches (partner notified), remove from queue, become `idle` |
-| `disconnect(c)` | Remove from queue and from any session (partner notified `reason:'partner_disconnected'`), delete client |
-| `findPartner(c, queue)` | Oldest waiting client that is not `c`, not in `c.avoid` (and `c` not in theirs). Prefer not `lastPartner`, but allow it if nobody else is waiting (important when only 2–3 people are online) |
+| `next(c, sessionId, {avoidPartner?})` | **In that session** → end it (partner gets `session_ended{reason:'partner_next'}` and becomes `idle`), then queue or match c. **In a different, newer session** → stale request, ignored (a double click can never skip a partner you haven't seen). **Idle** (partner already left) → same as `join`. **Waiting** → no-op. `avoidPartner` also puts the skipped partner on c's avoid list (used by "Report & skip" in M7) |
+| `leave(c)` | Leave the queue or end the current session (partner gets `reason:'partner_left'`), become `idle`. Takes no session id: see DECISIONS D-019 |
+| `disconnect(c)` | Remove from queue and from any session (partner gets `reason:'partner_disconnected'`), delete client |
+| `getPartner(c, sessionId)` | The partner's id, but only if `sessionId` is c's **current** session. The relay layer (M2) uses this, so a late message from an old conversation is never delivered |
+| `findPartner(c, waiting)` | Oldest waiting client that is not `c` and not avoided in either direction. Prefer someone who wasn't `c`'s last partner, but allow the last partner if nobody else is eligible (important when only 2–3 people are online; see D-020) |
+
+Only the **partner** receives `session_ended`. The client who pressed Next or Leave already knows, and learns its new state from the `waiting`/`matched` effect.
 
 **After a partner leaves**, you see "Stranger left" with a Next button. You are **not** automatically re-queued, so you stay in control of when your camera goes to a new person. The person who *pressed* Next is re-queued immediately.
 
@@ -170,9 +179,8 @@ Defined once as **zod schemas in `packages/shared/src/events.ts`**. Both server 
 | Event | Payload | Notes |
 |---|---|---|
 | `queue:join` | `{}` | ack → `{ok}` or `{ok:false, code}` |
-| `queue:leave` | `{}` | |
+| `leave` | `{}` | leave the queue or end the current session, go idle (D-019) |
 | `session:next` | `{sessionId}` | end current (if matches) + re-queue |
-| `session:leave` | `{sessionId}` | end current, go idle |
 | `signal` | `{sessionId, description?}` or `{sessionId, candidate?}` | relayed to partner only |
 | `chat:send` | `{sessionId, clientMsgId, text}` | text 1–1000 chars; ack → `{ok}` |
 | `media:state` | `{sessionId, audio:boolean, video:boolean}` | so partner can show "camera off" |

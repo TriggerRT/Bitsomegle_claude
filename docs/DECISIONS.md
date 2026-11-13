@@ -121,3 +121,22 @@ _(Node version detail refined in D-018: ≥22.12 locally, 24 LTS in production.)
 - **Biome** lints/formats code only (Markdown excluded so it doesn't reformat the docs).
 - **Playwright** is installed in M3, when there's a UI to test, not now.
 - **`reference/omegle_2027/app-8fdlxwxjrytd/` is not tracked by git:** it contains its own `.git` folder, so git would store only a broken pointer, and removing that folder would mean editing `reference/`. It stays on disk for reading.
+
+## D-019 — `leave` takes no session id (one `leave` event instead of `queue:leave` + `session:leave`)
+*Accepted · 2026-11-13 (M1) · refines the event contract first sketched in ARCHITECTURE §4*
+- **Decision:** `Matchmaker.leave(client)` always means "take me out of whatever I'm in". `next` still requires the session id.
+- **Why:** Session ids exist to stop **stale** requests from damaging a newer session. A Next can be stale: a double click sends two Nexts, and by the time the second arrives the user is already with a new partner, who must not be skipped unseen. A Leave cannot be harmful in that way, because the user's intent is always "stop now". Guarding it would create a bug instead: if the user presses Leave while waiting, and the server matched them a few milliseconds earlier, a guarded leave would be ignored and they'd be stuck in a call they tried to leave.
+- **Alternatives:** Separate `queue:leave{}` and `session:leave{sessionId}` (the original sketch). Rejected for the reason above.
+
+## D-020 — The last partner can be re-matched immediately when nobody else is eligible
+*Accepted · 2026-11-13 (M1) · open to change*
+- **Decision:** `findPartner` prefers anyone who wasn't your most recent partner, but falls back to that partner if they're the only eligible person waiting.
+- **Why:** With only two people online, a strict "never your last partner" rule would leave both waiting forever. It also keeps two-device testing simple.
+- **Known downside:** If two people skip each other and nobody else is online, pressing Next pairs them again straight away.
+- **Alternative to consider after beta:** a short cooldown (the old code used 15 s) before the same pair can meet again. That needs a timer that re-checks the queue, so it was left out of M1.
+- **Not affected:** "Report & skip" (`avoidPartner`) is strict. An avoided pair is never matched again.
+
+## D-021 — Matchmaker returns effects; unknown clients are ignored
+*Accepted · 2026-11-13 (M1)*
+- **Decision:** Matchmaker methods return a list of effects (`waiting`, `matched`, `session_ended`) for the socket layer to deliver. Only the partner gets `session_ended`. Operations for an unknown client id return no effects instead of throwing.
+- **Why:** Returning data keeps the logic free of sockets and directly testable. Ignoring unknown ids is safe, because an event can legitimately arrive just after its sender disconnected, and an exception there could crash the server. States that should be impossible (a client pointing at a missing session) do throw, with a "Matchmaker bug" message.

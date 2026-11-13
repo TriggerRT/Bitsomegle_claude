@@ -12,20 +12,22 @@ Milestones in order. Each one ends **tested** and with the docs updated. Details
 - [x] `tsconfig.base.json`, Biome config, root scripts (`dev:server`, `dev:web`, `build`, `typecheck`, `test`, `lint`, `format`, `check`)
 - [x] GitHub Actions CI: install → lint → typecheck → build → test (Node 22 + 24)
 - [x] Fill in the Commands section of `CLAUDE.md`
-- [ ] First commit + push to a GitHub repo, then confirm CI goes green (**needs you**: create the GitHub repo)
+- [x] First commit + push to GitHub (private repo `TriggerRT/Bitsomegle_claude`); CI green on Node 22 and 24 (confirmed by user, 2026-11-13)
 
-## M1 — Matchmaking core (pure logic)
-- [ ] `Matchmaker` (connect, join, next, leave, disconnect) returning effects, all synchronous
-- [ ] `findPartner` (FIFO, never self, avoid list, prefer-not-last-partner)
-- [ ] `assertInvariants()` helper
-- [ ] Unit tests: 2 users match; 3 users (one waits); simultaneous joins; Next; both press Next; disconnect while waiting; disconnect while matched; repeated join; duplicate events; stale sessionId
-- [ ] Randomized test: thousands of random operation sequences, invariants checked after every step
-- **Done when:** all tests pass; coverage of `matchmaking/` ≈ 100%
+## M1 — Matchmaking core (pure logic) ✅ (2026-11-13)
+- [x] `Matchmaker` (connect, join, next, leave, disconnect, getPartner, stats) returning effects, all synchronous
+- [x] `findPartner` (FIFO, never self, avoid list, prefer-not-last-partner)
+- [x] `assertInvariants()`
+- [x] Unit tests: 2 users match; 3 users (one waits); many joining at once; Next; both press Next; repeated Next; disconnect while waiting; disconnect while matched; repeated join; duplicate events; stale sessionId; unknown clients
+- [x] Randomized test: 2,000 sequences × 150 operations, invariants and client/server agreement checked after every step
+- [x] Bug-injection check: 9 deliberate bugs, all caught
+- [x] `npm run test:coverage` added; all real logic in `matchmaking/` is covered
 
 ## M2 — Realtime server
 - [ ] zod event schemas in `packages/shared`
 - [ ] Socket.IO server, CORS allow-list, `maxHttpBufferSize`, tuned heartbeats
-- [ ] Handlers: queue, next, leave, signal relay, chat relay, media:state; stale-session drops
+- [ ] Handlers: queue:join, session:next, leave, signal relay, chat relay, media:state; stale-session drops (use `Matchmaker.getPartner`)
+- [ ] Call `connect`/`disconnect` on socket connect/disconnect; deliver returned effects
 - [ ] Token-bucket rate limiter
 - [ ] `/health`, `/status`; opening-hours gate (`schedule/openHours.ts`) with tests
 - [ ] pino logging with no content
@@ -73,6 +75,7 @@ Milestones in order. Each one ends **tested** and with the docs updated. Details
 - [ ] Avoid-list and cooldown thresholds
 - [ ] Landing page wording: 18+ notice vs "for BITS students"
 - [ ] Auto-re-queue after partner leaves? (current default: no, D-014)
+- [ ] Cooldown before the same two people can be re-paired? (current: immediate if nobody else is waiting, D-020)
 - [ ] Styling: plain CSS modules or Tailwind?
 
 ## Later / maybe

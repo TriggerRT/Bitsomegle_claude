@@ -4,7 +4,7 @@ Anonymous 1:1 video chat with random matching and a Next button, for BITS Pilani
 The full product brief is in [docs/MASTER_PROMPT.md](docs/MASTER_PROMPT.md); read it before making architectural changes.
 
 ## Current phase
-M0 (repo tooling) done: workspaces, TypeScript, Biome, vitest, CI and a placeholder server/web app. Next milestone: **M1, matchmaking core**. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/TODO.md](docs/TODO.md).
+M0 (tooling) and M1 (matchmaking core in `apps/server/src/matchmaking/`, fully tested, not yet wired to sockets) are done. Next milestone: **M2, realtime server**. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/TODO.md](docs/TODO.md).
 
 ## Stack (decided — see docs/DECISIONS.md for reasons)
 - **Web:** Vite + React + TypeScript SPA → Vercel (free).
@@ -32,6 +32,7 @@ Node ≥ 22.12 required (CI also tests Node 24, the production target).
 | `npm run dev:server` | Server with auto-restart on save (tsx), port 3001, `GET /health` |
 | `npm run dev:web` | Web app dev server (Vite), http://localhost:5173 |
 | `npm test` / `npm run test:watch` | All vitest tests (projects listed in root `vitest.config.ts`) |
+| `npm run test:coverage` | Tests plus a report of which lines they ran |
 | `npm run typecheck` | `tsc` in every workspace (no output files) |
 | `npm run lint` / `npm run format` | Biome check / auto-fix (Markdown and `reference/` are excluded) |
 | `npm run build` | Build shared → server → web (in that order) into each `dist/` |
@@ -46,7 +47,7 @@ Node ≥ 22.12 required (CI also tests Node 24, the production target).
 
 ## Hard rules
 1. **Never edit anything in `reference/`.** It is inspiration only; evaluate before reusing any idea. It contains a leaked secret in `.env.local` files: never copy, print or commit those files. `.gitignore` excludes `reference/**/.env*`, `reference/**/*.zip`, and `reference/omegle_2027/app-8fdlxwxjrytd/` (an embedded git repo, so git can't track it).
-2. **Matchmaker methods are synchronous.** No `await` between reading and changing matchmaking state. This is what makes matching atomic (see ARCHITECTURE.md → "Why synchronous = atomic").
+2. **Matchmaker methods are synchronous.** Any change to `matchmaking/` must keep the randomized test (`Matchmaker.fuzz.test.ts`) passing. No `await` between reading and changing matchmaking state. This is what makes matching atomic (see ARCHITECTURE.md → "Why synchronous = atomic").
 3. **Every in-session event carries `sessionId`** in both directions. Server drops events whose `sessionId` is not the sender's current session; client ignores events for any session other than its current one.
 4. **Membership comes from server state, never from the client.** Never send a partner's socket id or any identity to a client.
 5. **Validate every incoming socket payload with the zod schemas in `packages/shared`.** Unknown or malformed → drop + rate-limit, never crash.
