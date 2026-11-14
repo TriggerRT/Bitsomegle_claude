@@ -249,3 +249,12 @@ _(Node version detail refined in D-018: ≥22.12 locally, 24 LTS in production.)
 - **Decision:** adding `?relay=1` to the page address makes that browser connect only through TURN.
 - **Why:** browsers prefer a direct path, so a working call says nothing about the relay. Phones have no `chrome://webrtc-internals` to inspect. This gives a yes/no test anyone can do.
 - **Safe to leave in:** it only restricts the visitor's own connection (and hides their address from the partner). It gives no access to anything.
+
+## D-037 — Findings from the first deployment attempt (M5)
+*Accepted · 2026-11-14*
+- **Vercel must install from the repository root.** With Root Directory `apps/web`, Vercel ran `npm install` inside that folder. npm then installs only that one workspace's packages (45 instead of 125), so the tools declared at the root (TypeScript, vitest, Node types) were missing and the build failed with "tsc: command not found". Fix: `"installCommand": "cd ../.. && npm ci"` in `apps/web/vercel.json`. Reproduced and then rehearsed locally in a clean copy.
+- **Alternative rejected:** declaring those tools again inside `apps/web`. It would work but repeats version numbers in two places.
+- **Lesson:** the Render commands had been rehearsed in a clean copy before the first attempt, Vercel's had not. Both are rehearsed now.
+- **Cloudflare asks for a card** before a TURN key can be created, although the order shows $0 due and 1,000 GB a month included. This answers the open item in D-002 and D-033. There is no spending cap; budget alerts only send an email.
+- **Consequence:** the TURN key is now optional for the first deployment (the server already runs with STUN only). Whether to give Cloudflare a card is the user's decision; the trade-offs are in DEPLOYMENT.md part 1.
+- **Fallback if the user declines:** Metered's Open Relay (20 GB a month free, about 40 relayed call-hours). Enough for testing, too small for daily use. It would need a second credential source next to `cloudflareTurn.ts`.

@@ -10,7 +10,7 @@ _Last updated: 2026-11-14 (M5 code done, not deployed yet)_
 |---|---|
 | Product brief ([MASTER_PROMPT.md](MASTER_PROMPT.md)) | Done |
 | Architecture ([ARCHITECTURE.md](ARCHITECTURE.md)) | Server (§3, §4) and web app (§5) implemented |
-| Decision log ([DECISIONS.md](DECISIONS.md)) | D-001 … D-036 |
+| Decision log ([DECISIONS.md](DECISIONS.md)) | D-001 … D-037 |
 | `CLAUDE.md` (repo root) | Done |
 | Git repository | Branch `main`, pushed to private GitHub repo `TriggerRT/Bitsomegle_claude` |
 | npm workspaces: `packages/shared`, `apps/server`, `apps/web` | Implemented, tested |
@@ -68,6 +68,7 @@ Status words: Implemented / Tested / Partially tested / Untested / Needs manual 
   - Settings: the two TURN values must come together; header name and cap are validated.
   - Browser: `?relay=1` makes that browser relay-only while the partner stays normal, and text chat still works when video can't connect.
 - Bug-injection check: 23 deliberate bugs in the new code (for example: expired credentials still handed out, error details logged, per-IP place never freed, cap off by one, `?relay=1` ignored). **All 23 were caught.**
+- **Rehearsal of Vercel's commands** in a clean copy (added after the first real build failed): installing from inside `apps/web` reproduced the failure; installing from the root built the site.
 - **Rehearsal of Render's commands** in a clean copy of the repository, with `NODE_ENV=production`: the build command succeeded; the server refused to start without `CORS_ORIGIN`; with it, `/health` answered, the allowed website got a CORS header and another website did not.
 - **One real request to Cloudflare** with a made-up key: Cloudflare answered 404, the server logged "Cloudflare refused" and started normally with STUN only. This shows the address is right and a refusal is handled. It does not show that real credentials work.
 - **Not verified:** everything that needs the real services. A real TURN key, Render's build, Vercel's build, the header Render uses for addresses, calls between two networks, phones, Safari, Firefox. See MANUAL_TESTS.md, M5-1 to M5-10.
@@ -126,7 +127,9 @@ Status words: Implemented / Tested / Partially tested / Untested / Needs manual 
 - ⚠️ **Leaked secret in old code:** `reference/omegle_2077…/web/.env.local` contains a real ZegoCloud server secret (it was also exposed to browsers through a `NEXT_PUBLIC_` variable). **Action for the user:** rotate it or delete that ZegoCloud project. Since M0, `.gitignore` excludes `reference/**/.env*` and the zip; a `git add` dry run confirmed no env file, zip or `node_modules` would be staged.
 - Render free tier: 0.1 CPU. Unknown whether it handles ~300 concurrent sockets smoothly → measured in M6.
 - Campus Wi-Fi may block UDP → relies on TURN over TLS on port 443. Confirmed only by manual test M5-7.
-- Unknown until tried: whether Cloudflare or Render ask for a card, and which header Render uses for visitor addresses (D-034).
+- **Cloudflare asks for a card** to create a TURN key ($0 due, 1,000 GB a month included, no spending cap). The user is deciding; the site can be deployed without the relay meanwhile (D-037).
+- First Vercel build failed ("tsc: command not found"). Fixed in `apps/web/vercel.json` and rehearsed locally; **not yet confirmed on Vercel** (D-037).
+- Unknown until tried: whether Render asks for a card, and which header Render uses for visitor addresses (D-034).
 
 ## Environment variables
 ### Server (set in the host's dashboard in production; see `apps/server/.env.example`)

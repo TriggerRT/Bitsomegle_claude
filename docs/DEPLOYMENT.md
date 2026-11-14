@@ -18,8 +18,10 @@ here. If a step doesn't match what you see, stop and tell Claude what the page s
 You need an account on each. Sign in to Vercel and Render **with your GitHub account**,
 so they can read the repository.
 
-**Money:** none of the steps below should ask for a card. If any page asks for payment
-details, **stop and tell Claude** before entering anything.
+**Money:** Cloudflare asks for a card before it lets you create a TURN key (found on
+2026-11-14), even though the price shown is $0. Read "Before you give Cloudflare a card"
+in part 1 first. Vercel and Render should not ask for one; if they do, **stop and tell
+Claude** before entering anything.
 
 **Secrets:** the Cloudflare **API token** in part 1 is a password. Paste it only into
 Render's dashboard. Never put it in a chat, in git, in Vercel, or in anything whose name
@@ -33,19 +35,45 @@ Render and Vercel read). Ask Claude to commit and push, and wait for CI to go gr
 
 ## Part 1 — Cloudflare: create the TURN key
 
+**This part is optional for a first deployment.** Without it the site still works: calls
+connect wherever a direct path exists, and pairs who would need the relay see "Couldn't
+connect video" (text chat still works). You can do parts 2 to 4 first, leave the two TURN
+values empty in part 3, and come back here later.
+
+### Before you give Cloudflare a card
+- **What you pay today:** $0. The order page says "Due today $0/month".
+- **What is free:** the first 1,000 GB of relayed data each month. After that, $0.05 per GB.
+- **What that means for us:** a relayed call uses very roughly 0.5 GB per hour, so 1,000 GB
+  is about 2,000 relayed call-hours a month. Only pairs who cannot connect directly are
+  relayed. A beta with friends uses a few GB.
+- **The risk:** there is **no spending cap**. If usage ever passed 1,000 GB in a month,
+  the card would be charged for the rest. Roughly: 100 people in relayed calls for 3.5
+  hours every single day would be about 2,600 GB, so about $80 a month.
+- **Your safety nets:**
+  1. A **budget alert** (steps below) emails you as soon as the bill passes $1.
+  2. **Off switch:** deleting the TURN key in Cloudflare stops all relay use at once.
+     The site keeps working without the relay.
+  3. Before a public launch, Claude can add a lower video bitrate and an automatic
+     cut-off (TODO.md, M6).
+- The other lines on the order page (RealtimeKit minutes, recording) are for Cloudflare
+  products Bitsomeggle does not use. They cost nothing unless used.
+
+### Steps
 1. Go to https://dash.cloudflare.com and sign up or log in.
 2. In the left menu open **Realtime** (older name: **Calls**), then **TURN Server**.
-3. Click **Create** (or "Create TURN app"). Name it `bitsomeggle`.
-4. Cloudflare shows two values. Copy both into a temporary text file **outside the
+3. Cloudflare shows an order summary for "Cloudflare Realtime" and asks for a payment
+   card. Check that it says **Due today $0**, then enter the card yourself.
+4. **Set the budget alert straight away:** **Manage Account → Billing → Billable Usage →
+   Create budget alert**. Name `any charge`, budget threshold `1` (USD), your email.
+   Save. This only sends an email; it does not stop anything.
+5. Back in **Realtime → TURN Server**, click **Create** (or "Create TURN app"). Name it
+   `bitsomeggle`.
+6. Cloudflare shows two values. Copy both into a temporary text file **outside the
    project folder**:
    - **Turn Token ID** → this becomes `TURN_KEY_ID`
    - **API Token** → this becomes `TURN_KEY_API_TOKEN` (the secret; it is shown only once)
 
 You should see: the new key listed on the TURN page.
-
-Cost: the first 1,000 GB of relayed data each month is free. A relayed call at our video
-size uses very roughly 0.5 GB per hour, and only pairs who cannot connect directly are
-relayed at all.
 
 ## Part 2 — Vercel: deploy the web app
 
@@ -80,6 +108,9 @@ with the Start button greyed out. That is correct: there is no server yet.
      **no** `/` at the end
    - `TURN_KEY_ID` → the Turn Token ID from part 1
    - `TURN_KEY_API_TOKEN` → the API Token from part 1
+
+   If you skipped part 1, leave both TURN values empty. You can fill them in later under
+   the service's **Environment** tab; saving there restarts the server with the relay on.
 4. Click **Apply** (or "Deploy Blueprint"). The first build takes 3 to 5 minutes.
 5. Open the `bitsomeggle` service and copy its address from the top of the page, for
    example `https://bitsomeggle.onrender.com`. Call this the **server address**.
@@ -87,6 +118,9 @@ with the Start button greyed out. That is correct: there is no server yet.
 You should see: the service marked **Live**. In its **Logs** tab, these lines:
 - `TURN credentials refreshed`
 - `Bitsomeggle server listening` with `"turnRelay":true`
+
+(Without a TURN key you instead see a warning that the TURN values are not set, and
+`"turnRelay":false`. That is expected.)
 
 Then delete the temporary text file from part 1.
 

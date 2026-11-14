@@ -65,8 +65,10 @@ Milestones in order. Each one ends **tested** and with the docs updated. Details
 - [x] `render.yaml`, `apps/web/vercel.json`, Vercel build check for `VITE_SERVER_URL` (D-035)
 - [x] Wake-up job `.github/workflows/wake-server.yml` (inactive until `SERVER_URL` is set)
 - [x] Guide written: [DEPLOYMENT.md](DEPLOYMENT.md); manual tests M5-1 to M5-10 written
-- [ ] Commit and push M5; CI green
-- [ ] **You:** Cloudflare TURN key (DEPLOYMENT part 1). Report whether a card was asked for
+- [x] Commit and push M5; CI green (confirmed by user, 2026-11-14)
+- [x] Fix the Vercel build: install from the repository root (D-037)
+- [ ] Push the fix; **you:** redeploy on Vercel and report
+- [ ] **You decide:** give Cloudflare a card for the TURN key, or deploy without the relay for now (DEPLOYMENT part 1, D-037)
 - [ ] **You:** deploy web to Vercel and server to Render (parts 2 to 4)
 - [ ] **Needs manual test:** M5-1 to M5-4 right after deploying (server alive, site connects, relay works, log check)
 - [ ] **Needs manual test:** M5-5 to M5-10 (phone ↔ laptop, two networks, campus Wi-Fi through the relay, Safari/Firefox/Android, a real second person, sleep and wake)
@@ -74,6 +76,7 @@ Milestones in order. Each one ends **tested** and with the docs updated. Details
 - [ ] Later: choose opening hours; set `OPEN_WINDOWS`, the wake-up time and `SERVER_URL` (DEPLOYMENT part 6)
 
 ## M6 — Reliability hardening
+- [ ] Before a public launch, if the Cloudflare relay is used: cap the video bitrate, and stop handing out TURN credentials automatically when the month's usage nears 1,000 GB (Cloudflare has no spending cap of its own, D-037)
 - [ ] ICE restart once when a call fails or stays disconnected (today the user is told and can press Next)
 - [ ] Reconnect grace via Socket.IO connection-state recovery
 - [ ] Server-restart behavior ("Connection lost, tap to rejoin")
