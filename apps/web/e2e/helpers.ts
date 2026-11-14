@@ -5,13 +5,18 @@ import { type Browser, expect, type Page } from '@playwright/test';
  * separate private window: nothing is shared between them except the server.
  *
  * `beforeLoad` runs inside the page before the app starts, for tests that need to change
- * how the browser behaves (for example, to pretend the camera is blocked).
+ * how the browser behaves (for example, to pretend the camera is blocked). `address` is
+ * the page to open, for tests that need something after the "?".
  */
-export async function openPerson(browser: Browser, beforeLoad?: () => void): Promise<Page> {
+export async function openPerson(
+  browser: Browser,
+  beforeLoad?: () => void,
+  address = '/',
+): Promise<Page> {
   const context = await browser.newContext();
   const page = await context.newPage();
   if (beforeLoad) await page.addInitScript(beforeLoad);
-  await page.goto('/');
+  await page.goto(address);
   await expect(startButton(page)).toBeEnabled();
   return page;
 }

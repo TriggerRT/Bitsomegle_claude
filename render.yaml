@@ -1,0 +1,47 @@
+# Render "Blueprint": describes the Bitsomeggle server so Render can create it in one step
+# (Render dashboard -> New -> Blueprint -> pick this repository).
+# Step-by-step instructions: docs/DEPLOYMENT.md
+#
+# Values written here are managed from this file: to change one, edit it here and push.
+# Entries marked "sync: false" are typed into Render's dashboard instead, because they are
+# secret or different for every deployment. They are never stored in this repository.
+services:
+  - type: web
+    name: bitsomeggle
+    runtime: node
+    plan: free
+    # Closest free region to India.
+    region: singapore
+    # --include=dev: the build needs TypeScript, which npm would skip because NODE_ENV is
+    # "production". The shared package is built first because the server loads its output.
+    buildCommand: npm ci --include=dev && npm run build -w @bitsomeggle/shared && npm run build -w @bitsomeggle/server
+    startCommand: node apps/server/dist/index.js
+    # Render calls this to decide whether a new version is healthy before switching to it.
+    healthCheckPath: /health
+    # Deploy a new commit only after the GitHub Actions checks (CI) have passed.
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_VERSION
+        value: 24.22.1
+      - key: NODE_ENV
+        value: production
+      # The address of the web app on Vercel, e.g. https://bitsomeggle.vercel.app
+      - key: CORS_ORIGIN
+        sync: false
+      # Cloudflare TURN key (docs/DEPLOYMENT.md, part 1). The token is a secret.
+      - key: TURN_KEY_ID
+        sync: false
+      - key: TURN_KEY_API_TOKEN
+        sync: false
+      # Render's proxy reports each visitor's real address in this header.
+      - key: CLIENT_IP_HEADER
+        value: true-client-ip
+      # One address may hold at most this many connections (half of MAX_CLIENTS, which
+      # defaults to 1000). Generous on purpose: the whole campus can share one address.
+      - key: MAX_CLIENTS_PER_IP
+        value: 500
+      # Opening hours are not set, so the site is always open. To open only at certain
+      # hours (Indian time), add for example:
+      #   - key: OPEN_WINDOWS
+      #     value: "21:00-00:30"
+      # and change the time in .github/workflows/wake-server.yml to match.

@@ -4,12 +4,24 @@ import { loadConfig } from './config.ts';
 const config = loadConfig();
 const app = createApp(config);
 
+if (config.turn === null) {
+  app.logger.warn(
+    'TURN_KEY_ID / TURN_KEY_API_TOKEN are not set: calls have no relay and will fail between some networks',
+  );
+}
+
+// Get the first TURN credentials before accepting visitors, so the very first pair
+// already has a relay. This gives up by itself after a few seconds and never throws.
+await app.iceServers.start();
+
 app.httpServer.listen(config.port, () => {
   app.logger.info(
     {
       port: config.port,
       corsOrigins: config.corsOrigins,
       alwaysOpen: config.openWindows.length === 0,
+      turnRelay: config.turn !== null,
+      perIpCap: config.maxClientsPerIp,
     },
     'Bitsomeggle server listening',
   );

@@ -42,8 +42,14 @@ export class TestClient {
   private readonly unread = new Map<string, unknown[]>();
   private readonly waiters = new Map<string, Array<(payload: unknown) => void>>();
 
-  constructor(url: string) {
-    this.socket = io(url, { transports: ['websocket'], forceNew: true, reconnection: false });
+  /** `headers` are extra request headers, as a hosting proxy would add them. */
+  constructor(url: string, headers: Record<string, string> = {}) {
+    this.socket = io(url, {
+      transports: ['websocket'],
+      forceNew: true,
+      reconnection: false,
+      extraHeaders: headers,
+    });
     this.socket.onAny((event: string, payload: unknown) => {
       this.log.push({ event, payload });
       const waiter = this.waiters.get(event)?.shift();
@@ -154,9 +160,9 @@ export interface TestServer {
   app: App;
   url: string;
   /** Connects a new pretend browser and waits for its first `status` event. */
-  connect: () => Promise<TestClient & { status: StatusPayload }>;
+  connect: (headers?: Record<string, string>) => Promise<TestClient & { status: StatusPayload }>;
   /** Connects without waiting, for tests where the connection is expected to fail. */
-  connectRaw: () => TestClient;
+  connectRaw: (headers?: Record<string, string>) => TestClient;
   stop: () => Promise<void>;
 }
 
@@ -170,6 +176,9 @@ export async function startTestServer(
       corsOrigins: ['http://localhost:5173'],
       openWindows: [],
       maxClients: 1000,
+      maxClientsPerIp: 0,
+      clientIpHeader: null,
+      turn: null,
       logLevel: 'silent',
       ...config,
     },
@@ -182,8 +191,8 @@ export async function startTestServer(
   const url = `http://127.0.0.1:${port}`;
   const clients: TestClient[] = [];
 
-  const connectRaw = (): TestClient => {
-    const client = new TestClient(url);
+  const connectRaw = (headers?: Record<string, string>): TestClient => {
+    const client = new TestClient(url, headers);
     clients.push(client);
     return client;
   };
@@ -192,8 +201,8 @@ export async function startTestServer(
     app,
     url,
     connectRaw,
-    connect: async () => {
-      const client = connectRaw();
+    connect: async (headers) => {
+      const client = connectRaw(headers);
       await client.waitUntilConnected();
       const status = await client.next<StatusPayload>('status');
       return Object.assign(client, { status });

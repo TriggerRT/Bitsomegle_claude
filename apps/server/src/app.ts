@@ -6,12 +6,15 @@ import { Matchmaker } from './matchmaking/Matchmaker.ts';
 import { getOpenStatus } from './schedule/openHours.ts';
 import { DEFAULT_RATE_LIMITS, type RateLimits } from './socket/rateLimit.ts';
 import { attachSocketServer, type SocketServer } from './socket/socketServer.ts';
-import { getIceServers } from './turn/iceServers.ts';
+import { createCloudflareTurnSource } from './turn/cloudflareTurn.ts';
+import { createStunOnlySource, type IceServerSource } from './turn/iceServers.ts';
 
 export interface App {
   httpServer: HttpServer;
   io: SocketServer;
   matchmaker: Matchmaker;
+  /** Supplies the STUN/TURN servers. Call `start()` on it before listening. */
+  iceServers: IceServerSource;
   logger: Logger;
   /** Disconnects everyone and stops the HTTP server. */
   close: () => Promise<void>;
@@ -21,6 +24,8 @@ export interface App {
 export interface AppOverrides {
   now?: () => number;
   rateLimits?: RateLimits;
+  /** Stands in for the real internet when the server asks Cloudflare for TURN credentials. */
+  fetch?: typeof fetch;
 }
 
 /**
@@ -34,24 +39,35 @@ export function createApp(config: ServerConfig, overrides: AppOverrides = {}): A
   const logger = pino({ level: config.logLevel });
   const matchmaker = new Matchmaker();
   const httpServer = createHttpServer();
+  const now = overrides.now ?? Date.now;
+
+  const iceServers = config.turn
+    ? createCloudflareTurnSource({ ...config.turn, logger, now, fetch: overrides.fetch })
+    : createStunOnlySource();
 
   const io = attachSocketServer(httpServer, {
     matchmaker,
     getOpenStatus: (nowMs) => getOpenStatus(config.openWindows, nowMs),
     corsOrigins: config.corsOrigins,
     maxClients: config.maxClients,
+    maxClientsPerIp: config.maxClientsPerIp,
+    clientIpHeader: config.clientIpHeader,
     rateLimits: overrides.rateLimits ?? DEFAULT_RATE_LIMITS,
-    getIceServers,
+    getIceServers: iceServers.getIceServers,
     logger,
-    now: overrides.now ?? Date.now,
+    now,
   });
 
   return {
     httpServer,
     io,
     matchmaker,
+    iceServers,
     logger,
-    // Closing Socket.IO also closes the HTTP server it is attached to.
-    close: () => io.close(),
+    close: () => {
+      iceServers.stop();
+      // Closing Socket.IO also closes the HTTP server it is attached to.
+      return io.close();
+    },
   };
 }

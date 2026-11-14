@@ -8,6 +8,9 @@ describe('loadConfig', () => {
       corsOrigins: ['http://localhost:5173'],
       openWindows: [],
       maxClients: 1000,
+      maxClientsPerIp: 0,
+      clientIpHeader: null,
+      turn: null,
       logLevel: 'info',
     });
   });
@@ -65,6 +68,49 @@ describe('loadConfig', () => {
     it.each(['0', '-5', 'lots'])('rejects %s', (value) => {
       expect(() => loadConfig({ MAX_CLIENTS: value })).toThrow(/Invalid MAX_CLIENTS/);
     });
+  });
+
+  describe('MAX_CLIENTS_PER_IP', () => {
+    it('is off unless set', () => {
+      expect(loadConfig({}).maxClientsPerIp).toBe(0);
+      expect(loadConfig({ MAX_CLIENTS_PER_IP: '300' }).maxClientsPerIp).toBe(300);
+    });
+
+    it.each(['-1', 'many'])('rejects %s', (value) => {
+      expect(() => loadConfig({ MAX_CLIENTS_PER_IP: value })).toThrow(/Invalid MAX_CLIENTS_PER_IP/);
+    });
+  });
+
+  describe('CLIENT_IP_HEADER', () => {
+    it('is stored in lower case, the way Node reports header names', () => {
+      expect(loadConfig({ CLIENT_IP_HEADER: ' True-Client-IP ' }).clientIpHeader).toBe(
+        'true-client-ip',
+      );
+    });
+
+    it.each(['two words', 'x-forwarded-for: 1.2.3.4'])('rejects %s', (value) => {
+      expect(() => loadConfig({ CLIENT_IP_HEADER: value })).toThrow(/Invalid CLIENT_IP_HEADER/);
+    });
+  });
+
+  describe('TURN_KEY_ID and TURN_KEY_API_TOKEN', () => {
+    it('are read together', () => {
+      expect(loadConfig({ TURN_KEY_ID: ' key ', TURN_KEY_API_TOKEN: ' token ' }).turn).toEqual({
+        keyId: 'key',
+        apiToken: 'token',
+      });
+    });
+
+    it('mean "no relay" when both are empty', () => {
+      expect(loadConfig({ TURN_KEY_ID: '', TURN_KEY_API_TOKEN: ' ' }).turn).toBeNull();
+    });
+
+    it.each([[{ TURN_KEY_ID: 'key' }], [{ TURN_KEY_API_TOKEN: 'token' }]])(
+      'reject one without the other: %j',
+      (env) => {
+        expect(() => loadConfig(env)).toThrow(/must be set together/);
+      },
+    );
   });
 
   describe('LOG_LEVEL', () => {

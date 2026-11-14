@@ -215,3 +215,37 @@ _(Node version detail refined in D-018: ≥22.12 locally, 24 LTS in production.)
 - **A failed call does not end the session.** The user is told, text still works, and they can press Next. Automatic recovery (one ICE restart) is M6.
 - **Mic and camera choices carry over to the next partner**, so someone who switched their camera off isn't suddenly on camera after pressing Next.
 - **STUN only for now** (`stun.cloudflare.com`). Calls across restrictive networks need TURN, which is M5.
+
+## D-033 — TURN credentials are fetched in the background and shared (M5)
+*Accepted · 2026-11-14 · refines D-002 (which said "~4 h")*
+- **Decision:** The server asks Cloudflare for credentials valid 12 hours, refreshes them every hour, and hands the latest set to every pair matched in that hour. Env vars: `TURN_KEY_ID`, `TURN_KEY_API_TOKEN`.
+- **Alternatives:** One fresh set per match (needs a network request while matching, which breaks the "matching never waits" rule, or a second message after the match). A long-lived shared password (anyone who copied it could use our relay for as long as it lived).
+- **Why 12 h and 1 h:** Cloudflare disconnects a relayed call when its credentials expire. With these numbers every set handed out has at least 11 hours left, far longer than a daily window. Shorter lifetimes would not stop misuse anyway, because anyone can get a fresh set by being matched.
+- **Failure behaviour:** keep the previous set while valid, retry every minute, fall back to STUN only. A Cloudflare outage must never stop matching.
+- **Not done:** limiting how much relay data one person can use. Revisit if the Cloudflare usage graph shows abuse.
+- **Still open:** whether Cloudflare asks for a card when the key is created. The user will find out in DEPLOYMENT.md part 1.
+
+## D-034 — Per-IP connection cap: off by default, trusted header, fail open (M5)
+*Accepted · 2026-11-14 · completes the "not done yet" item in D-025*
+- **Decision:** `MAX_CLIENTS_PER_IP` (0 = off) caps connections per address. `CLIENT_IP_HEADER` names the proxy header that holds the visitor's address; unset means "use the connection's own address". On Render: `true-client-ip` and a cap of 500, half of `MAX_CLIENTS`.
+- **Why so high:** on campus, hundreds of students share one address (D-013). The cap only guarantees that one address can never take the whole server.
+- **Why a named header:** behind a proxy every connection appears to come from the proxy. Render's documentation doesn't say which header carries the visitor's address; community reports say `True-Client-IP` / `CF-Connecting-IP`, set by the Cloudflare layer in front of Render. A header that visitors could set themselves must not be used: someone could pretend to be the campus address and use up its allowance.
+- **Fail open:** if the header is missing, the connection is accepted and not counted, and one warning is logged. Refusing everybody because of a wrong setting would be much worse than not limiting.
+- **To verify after deploying:** the log line "address headers on the first connection" lists which of the usual headers are present (names only). Manual test M5-4.
+- **Refusal looks like "server full"** to the browser. A separate message isn't worth a new screen yet.
+
+## D-035 — Deployment is described in files in the repository (M5)
+*Accepted · 2026-11-14*
+- **Decision:** `render.yaml` (a Render Blueprint) describes the server; `apps/web/vercel.json` holds the web app's build settings and security headers. Secrets and the two addresses are typed into the dashboards.
+- **Why:** the settings can be read, reviewed and changed with a commit, and a new deployment is "pick the repository" instead of twenty form fields a beginner has to get right.
+- **Render deploys only after CI passes** (`autoDeployTrigger: checksPass`), so a commit with failing tests never reaches users.
+- **The Vercel build stops if `VITE_SERVER_URL` is missing or not https.** Without that check the site would deploy and show a blank page.
+- **Wake-up ping:** a GitHub Actions schedule, inactive until the variable `SERVER_URL` exists. One run a day costs about a minute of the free Actions allowance. cron-job.org was the alternative; this keeps everything in one place.
+- **Opening hours stay unset** (always open) during the beta, so the user can test with friends at any time.
+- **Still to learn from the real deployment:** whether Render or Cloudflare ask for a card; the exact dashboard wording.
+
+## D-036 — `?relay=1` switch for testing the relay (M5)
+*Accepted · 2026-11-14*
+- **Decision:** adding `?relay=1` to the page address makes that browser connect only through TURN.
+- **Why:** browsers prefer a direct path, so a working call says nothing about the relay. Phones have no `chrome://webrtc-internals` to inspect. This gives a yes/no test anyone can do.
+- **Safe to leave in:** it only restricts the visitor's own connection (and hides their address from the partner). It gives no access to anything.

@@ -252,6 +252,30 @@ test('the connection to the previous partner is closed, not left running', async
   expect(await connectionStates(carol)).toEqual(['closed']);
 });
 
+test('adding ?relay=1 to the address makes that browser use the relay only', async ({
+  browser,
+}) => {
+  const policies = (page: Page): Promise<(string | undefined)[]> =>
+    page.evaluate(() =>
+      (window as unknown as { createdConnections: RTCPeerConnection[] }).createdConnections.map(
+        (connection) => connection.getConfiguration().iceTransportPolicy,
+      ),
+    );
+  const alice = await openPerson(browser, recordConnections, '/?relay=1');
+  const bob = await openPerson(browser, recordConnections);
+
+  await startChatBetween(alice, bob);
+
+  expect(await policies(alice)).toEqual(['relay']);
+  expect(await policies(bob)).toEqual(['all']);
+
+  // The test server has no relay, so Alice's video cannot connect. Text does not go
+  // through the call, so it must keep working.
+  await say(alice, 'can you read this?');
+  await expect(messages(bob)).toContainText(['can you read this?']);
+  await expect(alice.getByTestId('remote-video')).toHaveJSProperty('videoWidth', 0);
+});
+
 test('cancelling while waiting switches the camera off', async ({ browser }) => {
   const alice = await openPerson(browser, recordMediaStreams);
 

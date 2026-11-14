@@ -1,0 +1,34 @@
+# Wakes the server shortly before opening time.
+#
+# Why: Render's free plan puts the server to sleep after 15 minutes without visitors, and
+# waking takes about a minute. This asks the server "are you alive?" a little before
+# opening, so the first student does not have to wait.
+#
+# It does nothing until you add a repository variable called SERVER_URL
+# (GitHub -> repository -> Settings -> Secrets and variables -> Actions -> Variables),
+# for example https://bitsomeggle.onrender.com. See docs/DEPLOYMENT.md, part 5.
+name: Wake server
+
+on:
+  schedule:
+    # GitHub uses UTC. 15:15 UTC = 20:45 in India, 15 minutes before a 21:00 opening.
+    # Keep this in step with OPEN_WINDOWS in render.yaml. GitHub may start it a few
+    # minutes late when it is busy.
+    - cron: "15 15 * * *"
+  # Also lets you run it by hand from the Actions tab.
+  workflow_dispatch:
+
+jobs:
+  wake:
+    if: vars.SERVER_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ask for /health until the server answers
+        env:
+          SERVER_URL: ${{ vars.SERVER_URL }}
+        # Retries for up to about two minutes while the server wakes up.
+        run: >
+          curl --fail --silent --show-error --max-time 30
+          --retry 8 --retry-delay 10 --retry-all-errors
+          "$SERVER_URL/health"

@@ -4,12 +4,12 @@ Anonymous 1:1 video chat with random matching and a Next button, for BITS Pilani
 The full product brief is in [docs/MASTER_PROMPT.md](docs/MASTER_PROMPT.md); read it before making architectural changes.
 
 ## Current phase
-M0 to M4 are done: tooling, matchmaking core, realtime server, web app with text chat, and peer-to-peer video and audio. All automated tests pass; M4 still has manual tests waiting on the user (`docs/MANUAL_TESTS.md`). Next milestone: **M5, deploy a beta and add TURN**. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/TODO.md](docs/TODO.md).
+M0 to M4 are done: tooling, matchmaking core, realtime server, web app with text chat, and peer-to-peer video and audio. **M5 (deploy a beta, add TURN) is half done:** the TURN credential code, per-IP cap and deployment files are written and tested locally, but nothing is deployed. The user still has to create the accounts and follow `docs/DEPLOYMENT.md`, then do manual tests M5-1 to M5-10 (`docs/MANUAL_TESTS.md`). After that: M6, reliability. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/TODO.md](docs/TODO.md).
 
 ## Stack (decided — see docs/DECISIONS.md for reasons)
 - **Web:** Vite + React + TypeScript SPA → Vercel (free).
 - **Server:** Node.js (≥22.12; 24 LTS in production) + TypeScript 7 + Socket.IO 4.8, `zod`, `pino` → Render free tier (Singapore). 
-- **Media:** raw WebRTC peer-to-peer; Cloudflare STUN today, TURN in M5 (credentials minted by the server).
+- **Media:** raw WebRTC peer-to-peer; Cloudflare STUN, plus Cloudflare TURN when `TURN_KEY_ID` / `TURN_KEY_API_TOKEN` are set (short-lived credentials fetched by the server in the background).
 - **Text chat:** relayed through Socket.IO (never stored, never logged).
 - **State:** in-memory on a single server instance. No Redis, no database (yet).
 - **Tests:** vitest (unit + simulated-client integration), Playwright with Chromium fake camera/mic.
@@ -21,6 +21,8 @@ docs/                 project documents (keep these up to date)
 packages/shared/      zod event schemas + types — the single client/server contract
 apps/server/          matchmaking/ (pure logic), socket/ (handlers, rate limits), turn/, moderation/, schedule/
 apps/web/             state/chatMachine.ts, services/ (socket, localMedia, peer), hooks/, components/, e2e/
+render.yaml           how Render builds and runs the server (see docs/DEPLOYMENT.md)
+apps/web/vercel.json  Vercel build settings and security headers for the web app
 reference/            OLD code from previous attempts — read-only
 ```
 
@@ -51,6 +53,14 @@ Node ≥ 22.12 required (CI also tests Node 24, the production target).
 - Integration tests (`apps/server/test/socket/*.integration.test.ts`) use `startTestServer()` and `TestClient` from `test/socket/helpers.ts`: a real server on a free port plus simulated browsers.
 - To assert that something did NOT arrive, call `client.sync()` and then check `unreadCount(event)`. Never sleep.
 - After changing `matchmaking/` or `socket/`, break the code on purpose once and confirm a test fails.
+- `IceServerSource.getIceServers()` (`turn/`) is called while a match is delivered, so it must stay synchronous: anything slow happens in the background refresh. Tests replace Cloudflare with the `fetch` override of `createApp`; no test may contact the real service.
+- Extra request headers for a test client (for example a proxy's address header): `server.connect({ 'true-client-ip': '1.2.3.4' })`.
+
+## Deployment
+- Server → Render (`render.yaml`), web → Vercel (root directory `apps/web`), relay → Cloudflare TURN. The user's step-by-step guide is `docs/DEPLOYMENT.md`; keep it correct when anything here changes.
+- Pushing to `main` deploys: Vercel at once, Render after CI passes. A server deploy disconnects everyone online.
+- A new server env var needs four places: `config.ts` (+ test), `apps/server/.env.example`, `render.yaml`, and the table in `docs/PROJECT_STATUS.md`.
+- Opening `…/?relay=1` forces that browser to use the TURN relay only (for testing the relay).
 
 ## Working on the web app
 - Decisions go in `state/chatMachine.ts` (pure reducer) with a unit test. Side effects (socket, camera, call) go in `services/chatController.ts`, whose `reconcile()` makes them match the state after every event; test it with the fakes in `chatController.test.ts`. `hooks/useChat.ts` only creates the controller; components only render.
@@ -68,7 +78,7 @@ Node ≥ 22.12 required (CI also tests Node 24, the production target).
 3. **Every in-session event carries `sessionId`** in both directions. Server drops events whose `sessionId` is not the sender's current session; client ignores events for any session other than its current one.
 4. **Membership comes from server state, never from the client.** Never send a partner's socket id or any identity to a client.
 5. **Validate every incoming socket payload with the zod schemas in `packages/shared`.** Unknown or malformed → drop + rate-limit, never crash. New events go through the `on()` helper in `socket/socketServer.ts`, which applies the rate limit and schema before the handler runs. Socket handlers are never `async`.
-6. **Never log chat text, SDP, ICE candidates or IP addresses.** Log event types and random ids only.
+6. **Never log chat text, SDP, ICE candidates, IP addresses, the TURN API token or TURN credentials.** Log event types and random ids only.
 7. **Secrets only in server env vars.** Nothing secret may use a `VITE_` prefix (those are bundled into the browser).
 8. Business logic (`matchmaking/`, `chatMachine.ts`, `services/`) must not import React or socket handlers.
 9. Do not add Redis, a database, auth, or new paid services without updating DECISIONS.md and asking the user.

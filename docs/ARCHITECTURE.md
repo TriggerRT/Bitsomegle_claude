@@ -37,7 +37,9 @@ Bitsomeggle has three moving parts:
 | Web app (static files) | Vercel Hobby | $0 |
 | Server | Render free web service, Singapore region | $0 (sleeps after 15 min idle; woken by a ping before the daily window) |
 | STUN | `stun.cloudflare.com` | $0, unlimited |
-| TURN relay | Cloudflare Realtime TURN | $0 up to 1,000 GB/month, then $0.05/GB |
+| TURN relay | Cloudflare Realtime TURN | $0 for the first 1,000 GB each month, then $0.05/GB |
+
+How to set these up, step by step: [DEPLOYMENT.md](DEPLOYMENT.md). The server is described for Render in `render.yaml`, and the web app's Vercel settings are in `apps/web/vercel.json`.
 
 The site is only **open for a 3–4 hour window each day** (configured in IST). Concentrating everyone into one window means people actually find each other.
 
@@ -86,7 +88,7 @@ The difficulty is that most devices don't have a public address. Your laptop sit
 
 Exchanging offers, answers and ICE candidates is called **signaling**. WebRTC doesn't say how to deliver them, so we send them through our Socket.IO server.
 
-TURN needs a username and password. Our server asks Cloudflare's API for **short-lived credentials** (~4 h) and hands them to the browser at match time. The long-lived Cloudflare API key never leaves the server.
+TURN needs a username and password. Our server asks Cloudflare's API for **short-lived credentials** and hands them to both browsers at match time. The long-lived Cloudflare API token never leaves the server. How the server keeps those credentials fresh is in §3.8.
 
 ### 2.4 Who offers first, and "perfect negotiation"
 To start a call, one browser sends an **offer** and the other replies with an **answer**. In Bitsomeggle both browsers have a camera to share, so left alone both would send an offer at the same moment. Two offers crossing is called a collision, or "glare". That was a real bug in the old `reference/omegle_2027` code.
@@ -116,8 +118,10 @@ With session IDs: the server drops any event whose `sessionId` isn't the sender'
 | `matchmaking/findPartner.ts` | Pure function: given a candidate and the queue, choose a partner. **Extension point** for interest-based matching later | No |
 | `socket/socketServer.ts` | The only place sockets and the Matchmaker meet. For each event: rate limit → validate (zod) → call the Matchmaker → deliver the returned effects. Handlers are never `async` | Yes |
 | `app.ts` | Builds the whole server (HTTP + Socket.IO + Matchmaker) without listening. `index.ts` starts it; tests create private instances | Yes |
-| `socket/rateLimit.ts` | Token buckets per socket per event type, plus generous per-IP limits | — |
-| `turn/cloudflareTurn.ts` | Mints and caches short-lived ICE server credentials | — |
+| `socket/rateLimit.ts` | Token buckets per socket per event type | — |
+| `socket/ipLimit.ts` | Counts connections per IP address for the per-IP cap; works out the visitor's address behind the hosting proxy | — |
+| `turn/iceServers.ts` | The `IceServerSource` interface (`getIceServers()` is synchronous) and the STUN-only source | — |
+| `turn/cloudflareTurn.ts` | Fetches short-lived TURN credentials from Cloudflare in the background and keeps the latest in memory (§3.8) | — |
 | `moderation/ModerationSink.ts` | Interface for reports and abuse events. v1 writes structured logs (no content); later could write to a DB | — |
 | `schedule/openHours.ts` | "Is the site open now? When does it open or close?" (IST windows from config) | — |
 | `config.ts` | Reads and validates env vars at startup; crashes early if something is missing | — |
@@ -174,7 +178,7 @@ _Implemented in M2: `apps/server/src/schedule/openHours.ts`._
 - On connect, each browser gets a `status` event: `{open, opensAt, closesAt, online}`. The landing page uses it for "opens in 2 h 10 min" and can flip itself to "closed" at `closesAt` without asking again.
 - **While closed:** `queue:join` is refused with code `closed`. `session:next` ends the current call (the user asked for that) but finds nobody new, and also replies `closed`.
 - **Calls in progress at closing time simply continue.** There are no timers and no forced endings (DECISIONS D-022).
-- A scheduled ping (cron-job.org or GitHub Actions) hits `/health` ~10 min before opening to wake the free Render instance _(M5)_.
+- A scheduled GitHub Actions job (`.github/workflows/wake-server.yml`) calls `/health` about 15 minutes before opening to wake the free Render instance. It does nothing until the repository variable `SERVER_URL` is set (DEPLOYMENT.md, part 6).
 
 ### 3.7 Protection limits
 _Implemented in M2: `apps/server/src/socket/rateLimit.ts` and `socketServer.ts`._
@@ -193,6 +197,22 @@ Each connected browser has its own set of **token buckets** (explained in `rateL
 - A refused request (rate limited or invalid) costs a **strike**. Strikes have their own bucket (30, refilling one every 5 s). A browser that runs out is disconnected.
 - A single message larger than **32 KB** closes that connection.
 - At most `MAX_CLIENTS` (default 1000) browsers may be connected. Extra connections are refused with `server_full`.
+- **Per-IP cap** (`socket/ipLimit.ts`, M5): at most `MAX_CLIENTS_PER_IP` connections from one address (off by default; 500 on Render). It stops one computer from filling the server alone. It is deliberately generous because the whole campus can share one address (D-013). Behind Render's proxy the visitor's address is read from the header named in `CLIENT_IP_HEADER`. If that header is missing the connection is let in uncounted, and the server logs one warning. Addresses are held in memory only while their connections are open and are never logged.
+
+### 3.8 TURN credentials
+_Implemented in M5: `apps/server/src/turn/`._
+
+**The problem:** handing the list of STUN/TURN servers to two matched browsers happens in the middle of delivering a match, and that code may never wait (§2.2). Asking Cloudflare for credentials takes a network round trip.
+
+**The answer:** ask in the background and read from memory.
+- At start-up the server asks Cloudflare once for credentials valid for **12 hours** (it waits at most 5 seconds for this before accepting visitors).
+- It asks again **every hour**. So whatever a browser is given still has at least 11 hours left, longer than any opening window. This matters because Cloudflare cuts a relayed call when its credentials expire.
+- `getIceServers()` only reads the latest answer. Everyone matched within the same hour receives the same credentials.
+- **If Cloudflare can't be reached:** keep using the previous credentials while they are valid and retry every minute. With none at all, browsers get STUN only, so calls still work wherever a direct path exists.
+- Without `TURN_KEY_ID` and `TURN_KEY_API_TOKEN` (local development, tests) the server uses STUN only and never contacts Cloudflare.
+- The API token and the credentials are never logged. A failed request logs only the HTTP status or the kind of error.
+
+**Checking that the relay works:** two browsers connect directly whenever they can, so a working call doesn't prove the relay works. Opening the site as `…/?relay=1` makes that browser refuse direct paths (`iceTransportPolicy: 'relay'`). If its video still connects, the relay works.
 
 ---
 
@@ -225,7 +245,7 @@ Client-to-server payloads are **zod schemas**, checked on the server for every m
 |---|---|
 | `status` | `{open, opensAt, closesAt, online}` (sent on connect) |
 | `queue:waiting` | none |
-| `session:matched` | `{sessionId, polite, iceServers}`. `iceServers` is the STUN/TURN list for the call (STUN only until M5) |
+| `session:matched` | `{sessionId, polite, iceServers}`. `iceServers` is the STUN/TURN list for the call (STUN, plus a TURN relay when the server has a Cloudflare key, §3.8) |
 | `session:ended` | `{sessionId, reason: 'partner_next' \| 'partner_left' \| 'partner_disconnected'}` |
 | `chat:message` | `{sessionId, text, at}` |
 | `signal` | same as the client's payload |
@@ -318,9 +338,10 @@ _Implemented in M4._
 |---|---|
 | Malformed / spoofed events | zod validation on every event; membership derived from server state; unknown events dropped |
 | Spam / rapid Next | Token buckets per socket per event (§3.7); repeated bad requests get the socket disconnected; button disabled until ack _(M3)_ |
-| Shared campus IP | **No same-IP exclusion.** Per-IP limits are generous and only for flood protection |
+| Shared campus IP | **No same-IP exclusion.** The per-IP connection cap is generous (half the server) and only for flood protection (§3.7) |
 | Joining arbitrary sessions | Impossible by design: the server decides who's in which session; clients can't name one to join |
-| Secrets | Server env vars only. Browser gets only short-lived TURN credentials. No `VITE_`-prefixed secrets |
+| Secrets | Server env vars only, typed into Render's dashboard and never stored in git. Browser gets only short-lived TURN credentials. No `VITE_`-prefixed secrets |
+| Embedding the site in another page | The web host sends `X-Frame-Options: DENY` and a `Permissions-Policy` that allows camera and microphone for our own page only (`apps/web/vercel.json`) |
 | Logging | Event types + random ids only. **Never** chat text, SDP, ICE candidates or IPs |
 | Cross-site use | CORS allow-list = the frontend origin only |
 | Reports _(M7)_ | "Report & skip": ends session, adds partner to the reporter's avoid list for the window, emits a `ModerationSink` event. Several distinct reporters → temporary cooldown for that socket |

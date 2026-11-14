@@ -16,7 +16,22 @@ export interface ServerConfig {
   openWindows: OpenWindow[];
   /** Soft cap on simultaneous connections. */
   maxClients: number;
+  /** Cap on simultaneous connections from one IP address. 0 means no cap. */
+  maxClientsPerIp: number;
+  /**
+   * Name of the request header in which the hosting proxy reports the visitor's real IP
+   * address. null means there is no proxy: use the address of the connection itself.
+   */
+  clientIpHeader: string | null;
+  /** Cloudflare TURN key for relayed calls. null means STUN only (no relay). */
+  turn: TurnConfig | null;
   logLevel: LogLevel;
+}
+
+export interface TurnConfig {
+  keyId: string;
+  /** SECRET. Never log it and never send it to a browser. */
+  apiToken: string;
 }
 
 const DEFAULT_PORT = 3001;
@@ -30,6 +45,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     corsOrigins: parseCorsOrigins(env.CORS_ORIGIN, env.NODE_ENV === 'production'),
     openWindows: parseOpenWindows(env.OPEN_WINDOWS),
     maxClients: parseInteger('MAX_CLIENTS', env.MAX_CLIENTS, DEFAULT_MAX_CLIENTS, 1, 100_000),
+    maxClientsPerIp: parseInteger('MAX_CLIENTS_PER_IP', env.MAX_CLIENTS_PER_IP, 0, 0, 100_000),
+    clientIpHeader: parseHeaderName(env.CLIENT_IP_HEADER),
+    turn: parseTurn(env.TURN_KEY_ID, env.TURN_KEY_API_TOKEN),
     logLevel: parseLogLevel(env.LOG_LEVEL),
   };
 }
@@ -71,6 +89,27 @@ function parseCorsOrigins(raw: string | undefined, isProduction: boolean): strin
     }
     return origin;
   });
+}
+
+function parseHeaderName(raw: string | undefined): string | null {
+  if (isBlank(raw)) return null;
+  // Node gives us header names in lower case, so we store the name that way too.
+  const name = raw.trim().toLowerCase();
+  if (!/^[a-z0-9-]+$/.test(name)) {
+    throw new Error(
+      `Invalid CLIENT_IP_HEADER "${raw}": expected a header name like true-client-ip`,
+    );
+  }
+  return name;
+}
+
+function parseTurn(keyId: string | undefined, apiToken: string | undefined): TurnConfig | null {
+  if (isBlank(keyId) && isBlank(apiToken)) return null;
+  if (isBlank(keyId) || isBlank(apiToken)) {
+    // One without the other is a mistake. Say so now instead of silently having no relay.
+    throw new Error('TURN_KEY_ID and TURN_KEY_API_TOKEN must be set together (or both left empty)');
+  }
+  return { keyId: keyId.trim(), apiToken: apiToken.trim() };
 }
 
 function parseLogLevel(raw: string | undefined): LogLevel {

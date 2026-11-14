@@ -46,7 +46,7 @@ Milestones in order. Each one ends **tested** and with the docs updated. Details
 - [x] Browser-test job added to CI
 - [x] CI green after push: both `check` jobs and the new `e2e` browser job (confirmed by user, 2026-11-14)
 
-## M4 — Video + audio ✅ automated (2026-11-14) · manual tests pending
+## M4 — Video + audio ✅ (2026-11-14)
 - [x] `services/localMedia.ts`: permission at Start, denied / no-device / in-use / insecure errors, audio-only fallback, stop all tracks
 - [x] `iceServers` in `session:matched` (STUN only until M5)
 - [x] `services/peer.ts`: impolite side offers first, perfect negotiation as safety net, one connection per session
@@ -54,16 +54,24 @@ Milestones in order. Each one ends **tested** and with the docs updated. Details
 - [x] Video tiles (partner large, self small and mirrored), mute and camera buttons, "camera off" / "muted" / "connecting" / "couldn't connect" notices, waiting-screen preview
 - [x] Playwright with pretend camera: video arrives both ways; Next swaps the stream; no live tracks after Leave; permission problems
 - [x] Manual checklist written: [MANUAL_TESTS.md](MANUAL_TESTS.md)
-- [ ] **Needs manual test (you):** M4-1 to M4-8 on your laptop with a real camera
-- [ ] Push and confirm CI is green
+- [x] Manual tests M4-1 to M4-8 on a laptop with a real camera (confirmed by user, 2026-11-14)
+- [x] Pushed (2026-11-14)
+- [x] CI green for the M4 push (confirmed by user, 2026-11-14)
 
-## M5 — Deploy beta + TURN
-- [ ] Cloudflare account + TURN key; `turn/cloudflareTurn.ts` with credential caching
-- [ ] Deploy server to Render (Singapore), web to Vercel; set `NODE_ENV=production`, `CORS_ORIGIN`, `OPEN_WINDOWS`
-- [ ] Per-IP connection cap, once we know how Render reports the real client IP (D-025)
-- [ ] Scheduled pre-opening ping
-- [ ] Replace `turn/iceServers.ts` with Cloudflare credentials refreshed in the background (handing them out at match time must stay synchronous)
-- [ ] **Needs manual test:** campus Wi-Fi ↔ mobile data, phone ↔ laptop, Chrome/Safari/Firefox, Android/iOS, a real second person (echo, delay, quality)
+## M5 — Deploy beta + TURN · code ✅ (2026-11-14) · deployment waiting on you
+- [x] `turn/cloudflareTurn.ts`: credentials fetched in the background, refreshed hourly, read from memory at match time (D-033)
+- [x] Per-IP connection cap with a configurable address header (D-034)
+- [x] `?relay=1` switch to test the relay (D-036)
+- [x] `render.yaml`, `apps/web/vercel.json`, Vercel build check for `VITE_SERVER_URL` (D-035)
+- [x] Wake-up job `.github/workflows/wake-server.yml` (inactive until `SERVER_URL` is set)
+- [x] Guide written: [DEPLOYMENT.md](DEPLOYMENT.md); manual tests M5-1 to M5-10 written
+- [ ] Commit and push M5; CI green
+- [ ] **You:** Cloudflare TURN key (DEPLOYMENT part 1). Report whether a card was asked for
+- [ ] **You:** deploy web to Vercel and server to Render (parts 2 to 4)
+- [ ] **Needs manual test:** M5-1 to M5-4 right after deploying (server alive, site connects, relay works, log check)
+- [ ] **Needs manual test:** M5-5 to M5-10 (phone ↔ laptop, two networks, campus Wi-Fi through the relay, Safari/Firefox/Android, a real second person, sleep and wake)
+- [ ] Record the two addresses in PROJECT_STATUS.md; correct DEPLOYMENT.md wherever the real pages differed
+- [ ] Later: choose opening hours; set `OPEN_WINDOWS`, the wake-up time and `SERVER_URL` (DEPLOYMENT part 6)
 
 ## M6 — Reliability hardening
 - [ ] ICE restart once when a call fails or stays disconnected (today the user is told and can press Next)

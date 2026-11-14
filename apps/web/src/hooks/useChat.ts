@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChatController, type ChatSnapshot, INITIAL_SNAPSHOT } from '../services/chatController.ts';
 import { acquireLocalMedia, stopMedia } from '../services/localMedia.ts';
-import { createPeerLink } from '../services/peer.ts';
+import { createPeerLink, relayOnlyRequested } from '../services/peer.ts';
 import { createChatSocket } from '../services/socket.ts';
 
 export interface ChatActions {
@@ -31,11 +31,12 @@ export function useChat(serverUrl: string): Chat {
   const [snapshot, setSnapshot] = useState<ChatSnapshot>(INITIAL_SNAPSHOT);
 
   useEffect(() => {
+    const relayOnly = relayOnlyRequested(window.location.search);
     const controller = new ChatController({
       socket: createChatSocket(serverUrl),
       acquireMedia: acquireLocalMedia,
       stopMedia,
-      createPeer: createPeerLink,
+      createPeer: (options) => createPeerLink({ ...options, relayOnly }),
       newId: () => crypto.randomUUID(),
       reportError: (message, error) => console.error(message, error),
     });

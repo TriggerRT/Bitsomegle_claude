@@ -15,6 +15,11 @@ export interface PeerOptions {
   /** Our role if both sides start setup at once. Decided by the server. */
   polite: boolean;
   iceServers: IceServer[];
+  /**
+   * Testing aid: only connect through the TURN relay, never directly. Used to check that
+   * the relay really works (see `relayOnlyRequested` below).
+   */
+  relayOnly?: boolean;
   /** Our microphone and camera. */
   localStream: MediaStream;
   /** Called when we have a setup message for the partner. */
@@ -31,6 +36,17 @@ export interface PeerLink {
   handleSignal: (signal: Signal) => void;
   /** Ends the call and releases the connection. Safe to call more than once. */
   close: () => void;
+}
+
+/**
+ * True if the page address asks for relay-only calls, like https://…/?relay=1.
+ *
+ * Normally two browsers connect directly whenever they can, so you cannot tell whether
+ * the relay would have worked. Adding ?relay=1 forbids the direct path for that browser:
+ * if video still connects, the relay works.
+ */
+export function relayOnlyRequested(search: string): boolean {
+  return new URLSearchParams(search).get('relay') === '1';
 }
 
 /** Extracts the setup part of a `signal` event from the server. */
@@ -63,7 +79,10 @@ export function toSignal(payload: SignalPayload): Signal {
  */
 export function createPeerLink(options: PeerOptions): PeerLink {
   const { polite, sendSignal, onRemoteStream, onCallState, onError } = options;
-  const connection = new RTCPeerConnection({ iceServers: options.iceServers });
+  const connection = new RTCPeerConnection({
+    iceServers: options.iceServers,
+    iceTransportPolicy: options.relayOnly ? 'relay' : 'all',
+  });
 
   let closed = false;
   /** True if we (the impolite side) decided to ignore the partner's colliding offer. */

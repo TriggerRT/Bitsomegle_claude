@@ -44,7 +44,8 @@ export function Landing({ state, onStart, onDismissNotice, onRetryConnection }: 
       </button>
 
       <p className="hint" aria-live="polite">
-        {connection === 'connecting' && 'Connecting…'}
+        {connection === 'connecting' &&
+          'Connecting… If the server was asleep, this can take up to a minute.'}
         {connection === 'reconnecting' && 'Connection lost. Reconnecting…'}
         {connection === 'full' && (
           <>

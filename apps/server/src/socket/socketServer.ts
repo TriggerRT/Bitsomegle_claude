@@ -16,6 +16,7 @@ import type { ZodType } from 'zod';
 import type { Matchmaker } from '../matchmaking/Matchmaker.ts';
 import type { MatchEffect } from '../matchmaking/types.ts';
 import type { OpenStatus } from '../schedule/openHours.ts';
+import { ConnectionCounter, clientIpOf, KNOWN_IP_HEADERS } from './ipLimit.ts';
 import { RateLimiter, type RateLimits } from './rateLimit.ts';
 
 /**
@@ -45,6 +46,10 @@ export interface SocketServerOptions {
   corsOrigins: readonly string[];
   /** Soft cap on simultaneous connections, to protect a small server. */
   maxClients: number;
+  /** Cap on simultaneous connections from one IP address. 0 means no cap. */
+  maxClientsPerIp: number;
+  /** Header in which the hosting proxy reports the visitor's IP. null: no proxy. */
+  clientIpHeader: string | null;
   rateLimits: RateLimits;
   /** STUN/TURN servers handed to both browsers when they are matched. */
   getIceServers: () => IceServer[];
@@ -100,10 +105,25 @@ export function attachSocketServer(
     }
   };
 
+  // Per-IP cap (see ipLimit.ts). Addresses are counted only when the cap is switched on.
+  const perIpCap = options.maxClientsPerIp;
+  const connectionsPerIp = new ConnectionCounter();
+  const ipOf = (socket: ClientSocket): string | null =>
+    perIpCap > 0 ? clientIpOf(socket.handshake, options.clientIpHeader) : null;
+  let firstConnectionSeen = false;
+  let warnedAboutMissingIp = false;
+
   // Runs before a connection is accepted.
-  io.use((_socket, next) => {
+  io.use((socket, next) => {
     if (io.of('/').sockets.size >= options.maxClients) {
       logger.warn({ maxClients: options.maxClients }, 'connection refused: server full');
+      next(new Error('server_full'));
+      return;
+    }
+    const ip = ipOf(socket);
+    if (ip !== null && connectionsPerIp.count(ip) >= perIpCap) {
+      // The address itself is deliberately not logged.
+      logger.warn({ perIpCap }, 'connection refused: too many connections from one address');
       next(new Error('server_full'));
       return;
     }
@@ -114,6 +134,24 @@ export function attachSocketServer(
     const clientId = socket.id;
     const limiter = new RateLimiter(options.rateLimits, now);
 
+    if (!firstConnectionSeen) {
+      firstConnectionSeen = true;
+      // Helps check, after deploying, which header the host uses for the visitor's
+      // address. Header NAMES only, never their values.
+      const present = KNOWN_IP_HEADERS.filter((name) => socket.handshake.headers[name]);
+      logger.info({ present }, 'address headers on the first connection (names only)');
+    }
+
+    const ip = ipOf(socket);
+    if (ip !== null) connectionsPerIp.add(ip);
+    else if (perIpCap > 0 && !warnedAboutMissingIp) {
+      warnedAboutMissingIp = true;
+      logger.warn(
+        { header: options.clientIpHeader },
+        'per-IP cap: visitor address not found, connection not counted (check CLIENT_IP_HEADER)',
+      );
+    }
+
     matchmaker.connect(clientId);
     logger.debug({ client: clientId }, 'client connected');
     socket.emit('status', currentStatus());
@@ -121,6 +159,7 @@ export function attachSocketServer(
     registerHandlers(socket, limiter);
 
     socket.on('disconnect', (reason) => {
+      if (ip !== null) connectionsPerIp.remove(ip);
       deliver(matchmaker.disconnect(clientId));
       logger.debug({ client: clientId, reason }, 'client disconnected');
     });
