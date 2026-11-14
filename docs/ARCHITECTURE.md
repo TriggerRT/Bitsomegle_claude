@@ -112,7 +112,8 @@ With session IDs: the server drops any event whose `sessionId` isn't the sender'
 |---|---|---|
 | `matchmaking/Matchmaker.ts` | Queue, sessions, client states, invariants. All methods synchronous. Returns a list of "effects" (e.g. `notify(A, matched…)`) instead of emitting directly | **No** |
 | `matchmaking/findPartner.ts` | Pure function: given a candidate and the queue, choose a partner. **Extension point** for interest-based matching later | No |
-| `socket/handlers.ts` | Validates payloads (zod), applies rate limits, calls the Matchmaker, performs the returned effects (emit events) | Yes |
+| `socket/socketServer.ts` | The only place sockets and the Matchmaker meet. For each event: rate limit → validate (zod) → call the Matchmaker → deliver the returned effects. Handlers are never `async` | Yes |
+| `app.ts` | Builds the whole server (HTTP + Socket.IO + Matchmaker) without listening. `index.ts` starts it; tests create private instances | Yes |
 | `socket/rateLimit.ts` | Token buckets per socket per event type, plus generous per-IP limits | — |
 | `turn/cloudflareTurn.ts` | Mints and caches short-lived ICE server credentials | — |
 | `moderation/ModerationSink.ts` | Interface for reports and abuse events. v1 writes structured logs (no content); later could write to a DB | — |
@@ -159,70 +160,122 @@ Only the **partner** receives `session_ended`. The client who pressed Next or Le
 **After a partner leaves**, you see "Stranger left" with a Next button. You are **not** automatically re-queued, so you stay in control of when your camera goes to a new person. The person who *pressed* Next is re-queued immediately.
 
 ### 3.5 Disconnects, heartbeats, restarts
-- **Heartbeats:** Socket.IO pings every ~10 s (tuned from the 25 s default) so a closed laptop drops out of the queue quickly.
+- **Clean disconnects** (tab closed, Leave) are seen immediately. The partner gets `session:ended{reason:'partner_disconnected'}`.
+- **Heartbeats:** the server pings every 10 s and waits up to 10 s for the reply (Socket.IO's defaults are 25 s and 20 s). A browser that vanishes without saying goodbye (laptop lid closed, Wi-Fi lost) is removed within about 20 s.
 - **Reconnect grace** _(M6)_: Socket.IO "connection state recovery" lets a client that drops for under ~10 s come back with the same id. The video keeps flowing during a signaling blip, because media is peer-to-peer. Until M6, a disconnect ends the session immediately.
 - **Server restart / deploy:** all in-memory state is lost and all sockets drop. Clients show "Connection lost, tap to rejoin". This is acceptable because nothing needs to survive, and live calls would be lost anyway.
 
 ### 3.6 Opening hours
-- Config: list of windows in IST, e.g. `OPEN_WINDOWS="21:00-00:30"`.
-- Outside a window: `queue:join` is refused with `error{code:'closed'}`, and `GET /status` + the `status` event tell the landing page when it opens (countdown).
-- At closing time: no new matches; existing calls get a grace period (e.g. 10 min), then end.
-- A scheduled ping (cron-job.org or GitHub Actions) hits `/health` ~10 min before opening to wake the free Render instance.
+_Implemented in M2: `apps/server/src/schedule/openHours.ts`._
+- Config: `OPEN_WINDOWS`, a comma-separated list of daily windows in IST on a 24-hour clock, e.g. `21:00-00:30`. A window may run past midnight. Empty means always open (the default for local development).
+- IST is always UTC+5:30, so the calculation is plain arithmetic and doesn't depend on the server machine's time zone.
+- On connect, each browser gets a `status` event: `{open, opensAt, closesAt, online}`. The landing page uses it for "opens in 2 h 10 min" and can flip itself to "closed" at `closesAt` without asking again.
+- **While closed:** `queue:join` is refused with code `closed`. `session:next` ends the current call (the user asked for that) but finds nobody new, and also replies `closed`.
+- **Calls in progress at closing time simply continue.** There are no timers and no forced endings (DECISIONS D-022).
+- A scheduled ping (cron-job.org or GitHub Actions) hits `/health` ~10 min before opening to wake the free Render instance _(M5)_.
+
+### 3.7 Protection limits
+_Implemented in M2: `apps/server/src/socket/rateLimit.ts` and `socketServer.ts`._
+
+Each connected browser has its own set of **token buckets** (explained in `rateLimit.ts`): a request type may burst a little, then is held to a steady rate.
+
+| Request | Burst | Steady rate |
+|---|---|---|
+| `queue:join` | 5 | 1 / s |
+| `session:next` | 3 | 1 / s |
+| `leave` | 5 | 1 / s |
+| `chat:send` | 5 | 2 / s |
+| `signal` | 100 | 30 / s (call setup sends 20–40 small messages at once) |
+| `media:state` | 6 | 2 / s |
+
+- A refused request (rate limited or invalid) costs a **strike**. Strikes have their own bucket (30, refilling one every 5 s). A browser that runs out is disconnected.
+- A single message larger than **32 KB** closes that connection.
+- At most `MAX_CLIENTS` (default 1000) browsers may be connected. Extra connections are refused with `server_full`.
 
 ---
 
 ## 4. Event contract
+_Implemented in M2. The source of truth is `packages/shared/src/events.ts`; this section is a summary._
 
-Defined once as **zod schemas in `packages/shared/src/events.ts`**. Both server and client import the same file, so the TypeScript types always match.
+Client-to-server payloads are **zod schemas**, checked on the server for every message. Both sides import the same file, so the TypeScript types always match.
+
+**Replies (acks).** Requests marked "ack" get a reply: `{ok: true}` or `{ok: false, code}`.
+
+| Code | Meaning |
+|---|---|
+| `invalid` | Payload didn't match the schema |
+| `rate_limited` | Too many requests too quickly |
+| `closed` | Outside opening hours |
+| `not_in_session` | The message named a session the sender isn't in (any more) |
 
 ### Client → Server
-| Event | Payload | Notes |
-|---|---|---|
-| `queue:join` | `{}` | ack → `{ok}` or `{ok:false, code}` |
-| `leave` | `{}` | leave the queue or end the current session, go idle (D-019) |
-| `session:next` | `{sessionId}` | end current (if matches) + re-queue |
-| `signal` | `{sessionId, description?}` or `{sessionId, candidate?}` | relayed to partner only |
-| `chat:send` | `{sessionId, clientMsgId, text}` | text 1–1000 chars; ack → `{ok}` |
-| `media:state` | `{sessionId, audio:boolean, video:boolean}` | so partner can show "camera off" |
-| `report` | `{sessionId, reason}` | reason from a fixed list _(M7)_ |
+| Event | Payload | Reply | Notes |
+|---|---|---|---|
+| `queue:join` | none | ack | Start looking. Harmless if repeated |
+| `session:next` | `{sessionId}` | ack | End that session (if it's the current one) and look again |
+| `leave` | none | ack | Leave the queue or end the current session, go idle (D-019) |
+| `chat:send` | `{sessionId, text}` | ack | Text is trimmed; 1–1000 characters |
+| `signal` | `{sessionId, description}` or `{sessionId, candidate}` | none | WebRTC call setup; relayed to the partner only |
+| `media:state` | `{sessionId, audio, video}` | none | So the partner can show "camera off" |
 
 ### Server → Client
 | Event | Payload |
 |---|---|
-| `status` | `{open, opensAt, closesAt, online}` |
-| `queue:waiting` | `{}` |
-| `session:matched` | `{sessionId, polite:boolean, iceServers}` |
-| `session:ended` | `{sessionId, reason: 'partner_next' \| 'partner_left' \| 'partner_disconnected' \| 'closing' \| 'moderation'}` |
-| `signal` | `{sessionId, description? / candidate?}` |
+| `status` | `{open, opensAt, closesAt, online}` (sent on connect) |
+| `queue:waiting` | none |
+| `session:matched` | `{sessionId, polite}` (`iceServers` is added in M4/M5) |
+| `session:ended` | `{sessionId, reason: 'partner_next' \| 'partner_left' \| 'partner_disconnected'}` |
 | `chat:message` | `{sessionId, text, at}` |
+| `signal` | same as the client's payload |
 | `media:state` | `{sessionId, audio, video}` |
-| `error` | `{code}` (`'rate_limited' \| 'closed' \| 'invalid' \| …`) |
+| `server:error` | `{code}`: a request **without** an ack was refused |
 
-**Rules:** no partner identity or socket id is ever sent. `sessionId` is an opaque random UUID; knowing it gives no power, because membership is checked against server state. Socket.IO `maxHttpBufferSize` is ~16 KB.
+**Rules:**
+- No partner identity or socket id is ever sent. `sessionId` is an opaque random UUID; knowing it gives no power, because membership is checked against server state.
+- A relay event (`chat:send`, `signal`, `media:state`) is passed on only if it names the sender's **current** session.
+- A late `signal` or `media:state` for a session that has just ended is dropped silently. That's normal traffic (it was already on its way), not an error.
+- Fields that aren't in the schema are removed before relaying.
+- Not in the contract yet: `report` (M7).
 
 ---
 
 ## 5. Web app design
 
 ### 5.1 Modules
-| Module | Responsibility |
-|---|---|
-| `state/chatMachine.ts` | Pure reducer: `(state, event) → state`. The single source of truth for which screen we're on. Unit-tested without a browser |
-| `services/socket.ts` | Socket.IO client; typed emit/on using the shared schemas |
-| `services/localMedia.ts` | `getUserMedia` once at Start; mute/unmute; stop all tracks on Leave or tab close |
-| `services/peer.ts` | One `RTCPeerConnection` per session; perfect negotiation; ICE restart once on failure; `close()` on session end |
-| `hooks/useChat.ts` | Connects services + reducer to React |
-| `components/` | `Landing`, `Waiting`, `CallView` (`VideoTile` ×2, `Controls`), `ChatPanel` (always visible during a call), `StatusBanner` |
+_Text-only version implemented in M3. Video parts arrive in M4._
+
+| Module | Responsibility | Status |
+|---|---|---|
+| `state/chatMachine.ts` | Pure reducer: `(state, event) → state`. The single source of truth for which screen we're on. Unit-tested without a browser | M3 |
+| `services/socket.ts` | Creates the Socket.IO client, typed with the shared contract; works out the server address | M3 |
+| `hooks/useChat.ts` | Connects socket + reducer to React. Forwards server events to the reducer; sends user actions to both the reducer and the server. Makes no decisions itself | M3 |
+| `components/` | `Landing` (with opening-hours countdown), `Waiting`, `Conversation`, `ChatPanel` | M3 |
+| `services/localMedia.ts` | `getUserMedia` once at Start; mute/unmute; stop all tracks on Leave or tab close | M4 |
+| `services/peer.ts` | One `RTCPeerConnection` per session; perfect negotiation; ICE restart once on failure | M4 |
+| `e2e/` | Playwright tests that drive real browser windows against a real server | M3 |
 
 ### 5.2 UI state machine
+The state has two independent parts.
+
+**Connection:** `connecting → connected ⇄ reconnecting`, or `full` if the server is at capacity.
+
+**Phase** (what the user is doing):
 ```
-idle ─Start→ requesting_media ─granted→ connecting ─→ waiting ─matched(sessionId, polite)→ in_call
-  ▲               └denied→ media_error                   ▲                                 │
-  └──── Leave ─────────────────────────────────────────── │ ◄── Next (re-queue) ────────────┤
-                                                         partner_left ◄── session:ended ────┘
-                      (any) ─socket lost→ reconnecting ─fail→ error
+            Start                 matched
+   idle ───────────► waiting ───────────────► in_session
+    ▲                 ▲   ▲                    │      │
+    │ Leave / Cancel  │   └────── Next ────────┘      │ partner ended it
+    │ refused         │                               ▼
+    └─────────────────┴────────── Next ────────── partner_left
 ```
-Also: `closed` (outside opening hours, with countdown).
+- **Optimistic updates:** pressing Start or Next changes the screen immediately, before the server answers, so the app feels instant.
+- **If the server says no** (closed, too fast, or no reply within 8 s), the app returns to the landing page with a notice **and sends `leave`**, so the server also forgets us. The two sides can't disagree about whether we're in a chat.
+- **Late server events are filtered.** `waiting` and `matched` are applied only while the user is waiting or in a chat. `session:ended` and incoming messages are applied only if they name the current session. Example: you press Cancel a split second after the server matched you. The `matched` event arrives while you're on the landing page and is ignored; your `leave` then ends that session on the server.
+- **While the user wants a chat, the server's latest word wins.** If it reports a newer session than the one on screen, the screen follows.
+- **Connection lost:** any chat is over (a new connection is a fresh start on the server), and the landing page says why. Socket.IO reconnects by itself.
+- **partner_left** keeps the old messages readable but the message box is disabled. Messages are cleared on Next, Leave or a new match.
+- **Opening hours:** the landing page works out open/closed from the last `status` and a 1-second clock, so it flips at the right moment without asking the server. The server still refuses a Start while closed.
+- _M4 adds:_ `requesting_media` and `media_error` before waiting.
 
 ### 5.3 Media lifecycle
 - **Permission is requested at Start.** Camera and mic access is required to enter, because it's a video app. If denied → `media_error` screen explaining how to re-enable it in the browser.
@@ -242,7 +295,7 @@ Remote video large, local video small (picture-in-picture), text chat panel alwa
 | Concern | Measure |
 |---|---|
 | Malformed / spoofed events | zod validation on every event; membership derived from server state; unknown events dropped |
-| Spam / rapid Next | Token buckets per socket per event (e.g. Next: burst 3, 1/s; chat: burst 5, 2/s); button disabled until ack |
+| Spam / rapid Next | Token buckets per socket per event (§3.7); repeated bad requests get the socket disconnected; button disabled until ack _(M3)_ |
 | Shared campus IP | **No same-IP exclusion.** Per-IP limits are generous and only for flood protection |
 | Joining arbitrary sessions | Impossible by design: the server decides who's in which session; clients can't name one to join |
 | Secrets | Server env vars only. Browser gets only short-lived TURN credentials. No `VITE_`-prefixed secrets |

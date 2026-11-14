@@ -4,11 +4,11 @@ Anonymous 1:1 video chat with random matching and a Next button, for BITS Pilani
 The full product brief is in [docs/MASTER_PROMPT.md](docs/MASTER_PROMPT.md); read it before making architectural changes.
 
 ## Current phase
-M0 (tooling) and M1 (matchmaking core in `apps/server/src/matchmaking/`, fully tested, not yet wired to sockets) are done. Next milestone: **M2, realtime server**. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/TODO.md](docs/TODO.md).
+M0 (tooling), M1 (matchmaking core), M2 (realtime server) and M3 (web app, text chat only) are done and tested. Two browser windows can match, chat and press Next. Next milestone: **M4, video and audio (WebRTC)**. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/TODO.md](docs/TODO.md).
 
 ## Stack (decided — see docs/DECISIONS.md for reasons)
 - **Web:** Vite + React + TypeScript SPA → Vercel (free).
-- **Server:** Node.js (≥22.12; 24 LTS in production) + TypeScript 7 + Socket.IO 4.8, `zod`, `pino` → Render free tier (Singapore). Socket.IO/zod/pino get added in M2.
+- **Server:** Node.js (≥22.12; 24 LTS in production) + TypeScript 7 + Socket.IO 4.8, `zod`, `pino` → Render free tier (Singapore). 
 - **Media:** raw WebRTC peer-to-peer, "perfect negotiation" pattern; Cloudflare STUN + TURN (credentials minted by the server).
 - **Text chat:** relayed through Socket.IO (never stored, never logged).
 - **State:** in-memory on a single server instance. No Redis, no database (yet).
@@ -29,9 +29,11 @@ Node ≥ 22.12 required (CI also tests Node 24, the production target).
 | Command | What it does |
 |---|---|
 | `npm install` | Install all workspaces (exact versions; `.npmrc` has `save-exact`) |
-| `npm run dev:server` | Server with auto-restart on save (tsx), port 3001, `GET /health` |
-| `npm run dev:web` | Web app dev server (Vite), http://localhost:5173 |
+| `npm run dev` | Server + web app together. Open http://localhost:5173 in two windows to try it |
+| `npm run dev:server` | Server only, auto-restart on save (tsx), port 3001. Reads `apps/server/.env` if present |
+| `npm run dev:web` | Web app only (Vite), http://localhost:5173 |
 | `npm test` / `npm run test:watch` | All vitest tests (projects listed in root `vitest.config.ts`) |
+| `npm run e2e` | Playwright browser tests. Starts its own server (:3101) and web app (:5273). First time: `npx playwright install chromium` |
 | `npm run test:coverage` | Tests plus a report of which lines they ran |
 | `npm run typecheck` | `tsc` in every workspace (no output files) |
 | `npm run lint` / `npm run format` | Biome check / auto-fix (Markdown and `reference/` are excluded) |
@@ -45,12 +47,24 @@ Node ≥ 22.12 required (CI also tests Node 24, the production target).
 - Each Node package has two tsconfigs: `tsconfig.json` (editor + typecheck, includes tests, emits nothing) and `tsconfig.build.json` (compiles `src/` to `dist/`).
 - A new test project must be added to `projects` in the root `vitest.config.ts`.
 
+## Testing the server
+- Integration tests (`apps/server/test/socket/*.integration.test.ts`) use `startTestServer()` and `TestClient` from `test/socket/helpers.ts`: a real server on a free port plus simulated browsers.
+- To assert that something did NOT arrive, call `client.sync()` and then check `unreadCount(event)`. Never sleep.
+- After changing `matchmaking/` or `socket/`, break the code on purpose once and confirm a test fails.
+
+## Working on the web app
+- All chat behaviour goes in `state/chatMachine.ts` (pure reducer) with a unit test. `hooks/useChat.ts` only forwards events and sends requests; components only render.
+- Server events can arrive late. The reducer must ignore `waiting`/`matched` unless the user is waiting or in a chat, and ignore `session_ended`/messages for any session but the current one.
+- If the server refuses Start or Next, go idle AND send `leave` (DECISIONS D-026).
+- Unit tests: `src/**/*.test.ts` (vitest). Browser tests: `e2e/*.spec.ts` (Playwright); find elements by role and visible text, as a user would.
+- Styling is plain CSS in `src/styles.css` (D-027).
+
 ## Hard rules
 1. **Never edit anything in `reference/`.** It is inspiration only; evaluate before reusing any idea. It contains a leaked secret in `.env.local` files: never copy, print or commit those files. `.gitignore` excludes `reference/**/.env*`, `reference/**/*.zip`, and `reference/omegle_2027/app-8fdlxwxjrytd/` (an embedded git repo, so git can't track it).
 2. **Matchmaker methods are synchronous.** Any change to `matchmaking/` must keep the randomized test (`Matchmaker.fuzz.test.ts`) passing. No `await` between reading and changing matchmaking state. This is what makes matching atomic (see ARCHITECTURE.md → "Why synchronous = atomic").
 3. **Every in-session event carries `sessionId`** in both directions. Server drops events whose `sessionId` is not the sender's current session; client ignores events for any session other than its current one.
 4. **Membership comes from server state, never from the client.** Never send a partner's socket id or any identity to a client.
-5. **Validate every incoming socket payload with the zod schemas in `packages/shared`.** Unknown or malformed → drop + rate-limit, never crash.
+5. **Validate every incoming socket payload with the zod schemas in `packages/shared`.** Unknown or malformed → drop + rate-limit, never crash. New events go through the `on()` helper in `socket/socketServer.ts`, which applies the rate limit and schema before the handler runs. Socket handlers are never `async`.
 6. **Never log chat text, SDP, ICE candidates or IP addresses.** Log event types and random ids only.
 7. **Secrets only in server env vars.** Nothing secret may use a `VITE_` prefix (those are bundled into the browser).
 8. Business logic (`matchmaking/`, `chatMachine.ts`, `services/`) must not import React or socket handlers.

@@ -1,3 +1,5 @@
+import type { SessionEndReason } from '@bitsomeggle/shared';
+
 /** Server-side id of one connected browser (the socket id). Never sent to other clients. */
 export type ClientId = string;
 
@@ -11,9 +13,6 @@ export type SessionId = string;
  * - in_session: paired with exactly one other client
  */
 export type ClientState = 'idle' | 'waiting' | 'in_session';
-
-/** Why a session ended, from the point of view of the partner who did NOT cause it. */
-export type SessionEndReason = 'partner_next' | 'partner_left' | 'partner_disconnected';
 
 /**
  * Something the outside world must be told after a matchmaking operation.

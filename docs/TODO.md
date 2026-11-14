@@ -23,28 +23,32 @@ Milestones in order. Each one ends **tested** and with the docs updated. Details
 - [x] Bug-injection check: 9 deliberate bugs, all caught
 - [x] `npm run test:coverage` added; all real logic in `matchmaking/` is covered
 
-## M2 — Realtime server
-- [ ] zod event schemas in `packages/shared`
-- [ ] Socket.IO server, CORS allow-list, `maxHttpBufferSize`, tuned heartbeats
-- [ ] Handlers: queue:join, session:next, leave, signal relay, chat relay, media:state; stale-session drops (use `Matchmaker.getPartner`)
-- [ ] Call `connect`/`disconnect` on socket connect/disconnect; deliver returned effects
-- [ ] Token-bucket rate limiter
-- [ ] `/health`, `/status`; opening-hours gate (`schedule/openHours.ts`) with tests
-- [ ] pino logging with no content
-- [ ] Integration tests with simulated clients: matching, Next, double Next, disconnects, duplicate/stale events, **no message leaks between sessions**, malformed payloads, rate limits
-- **Done when:** integration suite passes
+## M2 — Realtime server ✅ (2026-11-13)
+- [x] zod event schemas and types in `packages/shared`
+- [x] Socket.IO server, CORS allow-list, 32 KB message cap, 10 s heartbeats
+- [x] Handlers: `queue:join`, `session:next`, `leave`, `chat:send`, `signal`, `media:state`; stale-session drops through `Matchmaker.getPartner`
+- [x] `connect`/`disconnect` wired to the Matchmaker; returned effects delivered
+- [x] Token-bucket rate limiter, strikes, `MAX_CLIENTS` cap
+- [x] `/health`; opening-hours gate (`schedule/openHours.ts`); `status` event on connect (no `GET /status`, D-023)
+- [x] pino logging with no content
+- [x] Integration tests with simulated browsers: matching, Next, double Next, disconnects, duplicate/stale events, no message leaks between sessions, malformed payloads, rate limits, 40 users at once
+- [x] Bug-injection check: 14 deliberate bugs, all caught
+- [x] Live run of the compiled server in production mode
 
-## M3 — First end-to-end slice (text only)
-- [ ] Vite React app scaffold
-- [ ] `chatMachine` reducer + unit tests
-- [ ] `services/socket.ts`, `hooks/useChat.ts`
-- [ ] Screens: Landing, Waiting, Conversation (chat panel), Partner left, Closed (countdown), Error
-- [ ] Next and Leave without page reload
-- [ ] Playwright: two windows Start → match → chat → Next → match a third window → leave
-- **Done when:** e2e passes; you can try it locally in two browser windows
+## M3 — First end-to-end slice (text only) ✅ (2026-11-14)
+- [x] Web app wired to the server with `socket.io-client`; `VITE_SERVER_URL`
+- [x] `npm run dev` runs server + web; server dev script reads `apps/server/.env` if present
+- [x] `chatMachine` reducer + unit tests
+- [x] `services/socket.ts`, `hooks/useChat.ts`
+- [x] Screens: Landing (with closed countdown, notices, server-full retry), Waiting, Conversation, Partner left
+- [x] Next, Leave and Cancel without page reload
+- [x] Playwright: three windows play the full journey, plus cancel, tab close, rapid Next, empty messages
+- [x] Browser-test job added to CI
+- [ ] Confirm the CI browser job is green after the next push (**needs you**: push)
 
 ## M4 — Video + audio
 - [ ] `services/localMedia.ts`: permission request at Start, denied/no-device/in-use errors, stop all tracks on Leave or tab close
+- [ ] Add `iceServers` to `session:matched` (STUN only until M5)
 - [ ] `services/peer.ts`: perfect negotiation, one RTCPeerConnection per session, close on session end
 - [ ] Video tiles (remote large, local picture-in-picture), camera/mic toggles + `media:state` placeholders
 - [ ] Playwright with fake camera: remote video receives frames; Next swaps partner; no live tracks after Leave
@@ -52,7 +56,8 @@ Milestones in order. Each one ends **tested** and with the docs updated. Details
 
 ## M5 — Deploy beta + TURN
 - [ ] Cloudflare account + TURN key; `turn/cloudflareTurn.ts` with credential caching
-- [ ] Deploy server to Render (Singapore), web to Vercel; set env vars; CORS
+- [ ] Deploy server to Render (Singapore), web to Vercel; set `NODE_ENV=production`, `CORS_ORIGIN`, `OPEN_WINDOWS`
+- [ ] Per-IP connection cap, once we know how Render reports the real client IP (D-025)
 - [ ] Scheduled pre-opening ping
 - [ ] **Needs manual test:** campus Wi-Fi ↔ mobile data, phone ↔ laptop, Chrome/Safari/Firefox, Android/iOS
 
@@ -66,17 +71,20 @@ Milestones in order. Each one ends **tested** and with the docs updated. Details
 - [ ] Report & skip, avoid list, temporary cooldown after multiple distinct reports
 - [ ] `ModerationSink` structured events
 - [ ] Community guidelines notice on landing page
-- [ ] "N people online" indicator
+- [ ] "N people online" indicator, with the count updating live (today `status` is sent once on connect)
+- [ ] Add the `report` event to the contract
 - [ ] Mobile layout (chat as bottom sheet), keyboard accessibility, clear error copy
+- [ ] Browser tests for the closed-hours and server-full screens
+- [ ] Keep zod out of the web bundle (import only types and constants from `shared`)
 - [ ] **Needs manual test:** full UX checklist on mobile and desktop
 
 ## Open questions (don't block M0)
-- [ ] Exact daily opening window(s) and days
+- [ ] Exact daily opening window(s) and days (`OPEN_WINDOWS` supports times today; specific weekdays would need a small addition)
+- [ ] Tune rate-limit numbers after the beta (ARCHITECTURE §3.7)
 - [ ] Avoid-list and cooldown thresholds
 - [ ] Landing page wording: 18+ notice vs "for BITS students"
 - [ ] Auto-re-queue after partner leaves? (current default: no, D-014)
 - [ ] Cooldown before the same two people can be re-paired? (current: immediate if nobody else is waiting, D-020)
-- [ ] Styling: plain CSS modules or Tailwind?
 
 ## Later / maybe
 - Interest-based matching (plug into `findPartner`)

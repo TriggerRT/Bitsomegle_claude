@@ -5,17 +5,20 @@
   "description": "Bitsomeggle web app (React single-page app)",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --strictPort",
     "build": "tsc -p tsconfig.json && vite build",
     "typecheck": "tsc -p tsconfig.json",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@bitsomeggle/shared": "0.0.0",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "socket.io-client": "4.8.4"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.0",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.3.0",

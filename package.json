@@ -21,12 +21,15 @@
     "lint": "biome check .",
     "format": "biome check --write .",
     "check": "npm run lint && npm run typecheck && npm test",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "dev": "concurrently -n server,web -c blue,green \"npm run dev:server\" \"npm run dev:web\"",
+    "e2e": "npm run e2e -w @bitsomeggle/web"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.7",
     "@types/node": "22.20.5",
     "@vitest/coverage-v8": "5.1.0",
+    "concurrently": "10.0.7",
     "typescript": "7.0.2",
     "vitest": "5.1.0"
   }

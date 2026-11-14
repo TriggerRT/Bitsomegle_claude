@@ -1,13 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import type { SessionEndReason } from '@bitsomeggle/shared';
 import { findPartner } from './findPartner.ts';
-import type {
-  ClientId,
-  ClientState,
-  ClientView,
-  MatchEffect,
-  SessionEndReason,
-  SessionId,
-} from './types.ts';
+import type { ClientId, ClientState, ClientView, MatchEffect, SessionId } from './types.ts';
 
 interface ClientRecord {
   readonly id: ClientId;

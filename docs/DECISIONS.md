@@ -140,3 +140,51 @@ _(Node version detail refined in D-018: ≥22.12 locally, 24 LTS in production.)
 *Accepted · 2026-11-13 (M1)*
 - **Decision:** Matchmaker methods return a list of effects (`waiting`, `matched`, `session_ended`) for the socket layer to deliver. Only the partner gets `session_ended`. Operations for an unknown client id return no effects instead of throwing.
 - **Why:** Returning data keeps the logic free of sockets and directly testable. Ignoring unknown ids is safe, because an event can legitimately arrive just after its sender disconnected, and an exception there could crash the server. States that should be impossible (a client pointing at a missing session) do throw, with a "Matchmaker bug" message.
+
+## D-022 — At closing time, calls in progress continue; only new matches stop
+*Accepted · 2026-11-13 (M2) · replaces the "grace period, then end" idea in the first sketch*
+- **Decision:** Outside opening hours the server refuses `queue:join`, and `session:next` ends the current call without finding a new partner. It never ends a call by itself.
+- **Why:** Ending calls on a timer needs a scheduled job, a new "server ended it" session reason and client handling for it. Letting people finish their conversation is simpler and friendlier, and nobody can start a new one anyway.
+- **Revisit when:** Calls running long after closing become a cost problem (TURN usage) or a moderation problem.
+
+## D-023 — Site status travels over the socket; no `GET /status`
+*Accepted · 2026-11-13 (M2)*
+- **Decision:** Every browser gets a `status` event when it connects. There is no separate HTTP status page.
+- **Why:** The web app connects its socket as soon as the page loads, so a second way to fetch the same data would be duplicate code with its own CORS setup.
+- **Consequence:** "online" counts every connected browser, including people still on the landing page. The count is sent once on connect; live updates are an M7 item.
+
+## D-024 — Event contract refinements made while implementing (M2)
+*Accepted · 2026-11-13*
+- **Error event is named `server:error`**, not `error`, to avoid confusion with Socket.IO's own connection errors.
+- **`chat:send` has no `clientMsgId`.** Socket.IO's ack already tells the sender which message was accepted.
+- **`session:matched` has no `iceServers` yet.** It's added with the WebRTC work (M4) and TURN (M5), where it can be tested.
+- **Schemas strip unknown fields instead of rejecting them**, so a future browser adding a field to its call-setup messages doesn't break calls, and nothing unexpected is ever relayed.
+- **Events we receive are typed as unknown on the server**, even though the shared package describes them, because a browser can send anything.
+
+## D-025 — Protection limits (M2)
+*Accepted · 2026-11-13 · numbers are first guesses, to be tuned after the beta*
+- **Decision:** Per-socket token buckets per request type, a strike bucket that disconnects persistent offenders, a 32 KB message cap and a `MAX_CLIENTS` cap. The numbers are in ARCHITECTURE §3.7.
+- **Why per socket and not per IP:** on campus, hundreds of students share one public IP (D-013).
+- **Not done yet:** a per-IP connection cap. It needs the real client IP, which depends on the hosting proxy, so it belongs with deployment (M5/M6).
+- **CORS is not security by itself.** It stops other websites' pages from using our server through a visitor's browser. A script outside a browser can ignore it, which is why every message is validated and rate limited regardless.
+
+## D-026 — Web app state: one reducer, optimistic updates, "leave on refusal" (M3)
+*Accepted · 2026-11-14*
+- **Decision:** All chat state lives in one pure reducer (`chatMachine.ts`) driven by React's built-in `useReducer`. No state library. Start and Next update the screen before the server replies. If the server refuses or doesn't answer, the client goes idle and sends `leave`.
+- **Why a reducer:** every transition is one line in one function and is unit-tested without a browser. It's the client-side twin of the server's Matchmaker.
+- **Why "leave on refusal":** a refused Next leaves the server still holding the old session while the screen has moved on. Forcing both sides to idle is the simplest state they can always agree on.
+- **Alternatives:** wait for the server before changing the screen (feels laggy on slow campus Wi-Fi); a state library such as XState or Zustand (extra dependency and concepts for about 150 lines of logic).
+
+## D-027 — Styling: plain CSS in one file (M3)
+*Accepted · 2026-11-14 · settles the "CSS modules or Tailwind?" open question*
+- **Why:** The app has four small screens. One stylesheet with CSS variables is the least to learn and adds no dependency or build step.
+- **Revisit when:** The stylesheet passes roughly 500 lines or class names start to clash. Then move to CSS modules.
+
+## D-028 — Dev and test tooling for the web app (M3)
+*Accepted · 2026-11-14*
+- **`npm run dev`** starts server and web together using `concurrently` (a small dev-only tool).
+- **The server's dev script reads `apps/server/.env` if it exists**, using Node's own `--env-file-if-exists`. No `dotenv` dependency.
+- **In development the web app finds the server at port 3001 on whatever host served the page**, so no `.env` is needed to get started. A production build requires `VITE_SERVER_URL`.
+- **Playwright tests start their own server (port 3101) and web app (port 5273)**, so they never clash with a running `npm run dev`. They run one at a time because they share one matchmaking queue.
+- **Unit tests are named `*.test.ts` next to the source; browser tests are `e2e/*.spec.ts`.** That naming is how vitest and Playwright each pick up only their own.
+- **No React component unit tests.** Logic is tested in the reducer; the real UI is tested end to end in a browser. A fake-browser layer in between would mostly repeat those.

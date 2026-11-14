@@ -1,0 +1,257 @@
+/* Bitsomeggle styles. One small file on purpose: plain CSS, no framework. */
+
+:root {
+  --bg: #0f1115;
+  --panel: #181b22;
+  --border: #2a2f3a;
+  --text: #e8eaf0;
+  --muted: #9aa3b2;
+  --accent: #6c8cff;
+  --accent-text: #0b0d12;
+  --danger: #ff7a7a;
+  --bubble-me: #2b3a6b;
+  --bubble-them: #252a35;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+/* ---------- Buttons ---------- */
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  padding: 10px 18px;
+  min-height: 44px; /* comfortable to tap on a phone */
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.secondary {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.big {
+  font-size: 1.15rem;
+  padding: 14px 32px;
+}
+
+.link {
+  background: none;
+  border: none;
+  padding: 0;
+  min-height: 0;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* ---------- Screens ---------- */
+
+.screen {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.landing,
+.waiting {
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  text-align: center;
+}
+
+.brand {
+  margin: 0;
+  font-size: clamp(2rem, 8vw, 3.2rem);
+  letter-spacing: -0.02em;
+}
+
+.tagline {
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+.hint {
+  min-height: 1.4em;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.notice {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.status-line {
+  margin: 0;
+  color: var(--muted);
+}
+
+.spinner {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 4px solid var(--border);
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
+
+/* ---------- Conversation ---------- */
+
+.conversation {
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.chat-panel {
+  flex: 1;
+  min-height: 0; /* lets the message list scroll instead of growing the page */
+  display: flex;
+  flex-direction: column;
+}
+
+.messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 16px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.empty {
+  margin: auto;
+  color: var(--muted);
+}
+
+.message {
+  max-width: 80%;
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: var(--bubble-them);
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  overflow-wrap: anywhere;
+}
+
+.message.me {
+  background: var(--bubble-me);
+  align-self: flex-end;
+}
+
+.author {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.failed {
+  font-size: 0.75rem;
+  color: var(--danger);
+}
+
+.composer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.composer input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  min-height: 44px;
+}
+
+@media (max-width: 520px) {
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+
+  .actions > button {
+    flex: 1;
+  }
+}
