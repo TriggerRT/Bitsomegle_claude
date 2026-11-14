@@ -3,6 +3,7 @@ import {
   type AckResult,
   chatSendSchema,
   type ErrorCode,
+  type IceServer,
   mediaStateSchema,
   nextSchema,
   type ServerToClientEvents,
@@ -45,6 +46,8 @@ export interface SocketServerOptions {
   /** Soft cap on simultaneous connections, to protect a small server. */
   maxClients: number;
   rateLimits: RateLimits;
+  /** STUN/TURN servers handed to both browsers when they are matched. */
+  getIceServers: () => IceServer[];
   logger: Logger;
   now: () => number;
 }
@@ -84,7 +87,11 @@ export function attachSocketServer(
       if (effect.type === 'waiting') {
         target.emit('queue:waiting');
       } else if (effect.type === 'matched') {
-        target.emit('session:matched', { sessionId: effect.sessionId, polite: effect.polite });
+        target.emit('session:matched', {
+          sessionId: effect.sessionId,
+          polite: effect.polite,
+          iceServers: options.getIceServers(),
+        });
         logger.debug({ sessionId: effect.sessionId, client: effect.to }, 'session matched');
       } else {
         target.emit('session:ended', { sessionId: effect.sessionId, reason: effect.reason });

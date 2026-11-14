@@ -41,6 +41,18 @@ describe('matchmaking over real connections', () => {
     expect([forA.polite, forB.polite].sort()).toEqual([false, true]);
   });
 
+  it('gives both browsers the same list of call-setup servers', async () => {
+    const a = await server.connect();
+    const b = await server.connect();
+    await a.request('queue:join');
+    await b.request('queue:join');
+    const forA = await a.next<MatchedPayload>('session:matched');
+    const forB = await b.next<MatchedPayload>('session:matched');
+
+    expect(forA.iceServers).toEqual([{ urls: 'stun:stun.cloudflare.com:3478' }]);
+    expect(forB.iceServers).toEqual(forA.iceServers);
+  });
+
   it('never tells a browser who its partner is', async () => {
     const a = await server.connect();
     const b = await server.connect();

@@ -44,25 +44,29 @@ Milestones in order. Each one ends **tested** and with the docs updated. Details
 - [x] Next, Leave and Cancel without page reload
 - [x] Playwright: three windows play the full journey, plus cancel, tab close, rapid Next, empty messages
 - [x] Browser-test job added to CI
-- [ ] Confirm the CI browser job is green after the next push (**needs you**: push)
+- [x] CI green after push: both `check` jobs and the new `e2e` browser job (confirmed by user, 2026-11-14)
 
-## M4 — Video + audio
-- [ ] `services/localMedia.ts`: permission request at Start, denied/no-device/in-use errors, stop all tracks on Leave or tab close
-- [ ] Add `iceServers` to `session:matched` (STUN only until M5)
-- [ ] `services/peer.ts`: perfect negotiation, one RTCPeerConnection per session, close on session end
-- [ ] Video tiles (remote large, local picture-in-picture), camera/mic toggles + `media:state` placeholders
-- [ ] Playwright with fake camera: remote video receives frames; Next swaps partner; no live tracks after Leave
-- [ ] **Needs manual test:** two real devices on the same Wi-Fi (checklist to be written in `docs/MANUAL_TESTS.md`)
+## M4 — Video + audio ✅ automated (2026-11-14) · manual tests pending
+- [x] `services/localMedia.ts`: permission at Start, denied / no-device / in-use / insecure errors, audio-only fallback, stop all tracks
+- [x] `iceServers` in `session:matched` (STUN only until M5)
+- [x] `services/peer.ts`: impolite side offers first, perfect negotiation as safety net, one connection per session
+- [x] `services/chatController.ts`: reconcile camera and call with the state; unit-tested with fakes
+- [x] Video tiles (partner large, self small and mirrored), mute and camera buttons, "camera off" / "muted" / "connecting" / "couldn't connect" notices, waiting-screen preview
+- [x] Playwright with pretend camera: video arrives both ways; Next swaps the stream; no live tracks after Leave; permission problems
+- [x] Manual checklist written: [MANUAL_TESTS.md](MANUAL_TESTS.md)
+- [ ] **Needs manual test (you):** M4-1 to M4-8 on your laptop with a real camera
+- [ ] Push and confirm CI is green
 
 ## M5 — Deploy beta + TURN
 - [ ] Cloudflare account + TURN key; `turn/cloudflareTurn.ts` with credential caching
 - [ ] Deploy server to Render (Singapore), web to Vercel; set `NODE_ENV=production`, `CORS_ORIGIN`, `OPEN_WINDOWS`
 - [ ] Per-IP connection cap, once we know how Render reports the real client IP (D-025)
 - [ ] Scheduled pre-opening ping
-- [ ] **Needs manual test:** campus Wi-Fi ↔ mobile data, phone ↔ laptop, Chrome/Safari/Firefox, Android/iOS
+- [ ] Replace `turn/iceServers.ts` with Cloudflare credentials refreshed in the background (handing them out at match time must stay synchronous)
+- [ ] **Needs manual test:** campus Wi-Fi ↔ mobile data, phone ↔ laptop, Chrome/Safari/Firefox, Android/iOS, a real second person (echo, delay, quality)
 
 ## M6 — Reliability hardening
-- [ ] ICE restart once, then end + re-queue
+- [ ] ICE restart once when a call fails or stays disconnected (today the user is told and can press Next)
 - [ ] Reconnect grace via Socket.IO connection-state recovery
 - [ ] Server-restart behavior ("Connection lost, tap to rejoin")
 - [ ] Load test: ~300 simulated clients against the deployed free instance → decide whether a paid plan is needed (D-009)

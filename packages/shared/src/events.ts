@@ -99,10 +99,22 @@ export interface StatusPayload {
   online: number;
 }
 
+/**
+ * One STUN or TURN server for WebRTC. Same shape as the browser's RTCIceServer, so the
+ * list can be passed straight to `new RTCPeerConnection({ iceServers })`.
+ */
+export interface IceServer {
+  urls: string | string[];
+  username?: string;
+  credential?: string;
+}
+
 export interface MatchedPayload {
   sessionId: string;
   /** Which role this browser plays if both sides start call setup at once. */
   polite: boolean;
+  /** Servers the browser uses to find a path to the partner for audio and video. */
+  iceServers: IceServer[];
 }
 
 export interface SessionEndedPayload {

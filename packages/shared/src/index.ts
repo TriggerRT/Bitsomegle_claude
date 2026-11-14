@@ -13,6 +13,7 @@ export {
   type ClientToServerEvents,
   chatSendSchema,
   type ErrorCode,
+  type IceServer,
   type MatchedPayload,
   type MediaStatePayload,
   mediaStateSchema,

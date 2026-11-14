@@ -6,6 +6,7 @@ import { Matchmaker } from './matchmaking/Matchmaker.ts';
 import { getOpenStatus } from './schedule/openHours.ts';
 import { DEFAULT_RATE_LIMITS, type RateLimits } from './socket/rateLimit.ts';
 import { attachSocketServer, type SocketServer } from './socket/socketServer.ts';
+import { getIceServers } from './turn/iceServers.ts';
 
 export interface App {
   httpServer: HttpServer;
@@ -40,6 +41,7 @@ export function createApp(config: ServerConfig, overrides: AppOverrides = {}): A
     corsOrigins: config.corsOrigins,
     maxClients: config.maxClients,
     rateLimits: overrides.rateLimits ?? DEFAULT_RATE_LIMITS,
+    getIceServers,
     logger,
     now: overrides.now ?? Date.now,
   });

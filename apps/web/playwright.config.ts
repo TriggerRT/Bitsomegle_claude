@@ -22,6 +22,16 @@ export default defineConfig({
   use: {
     baseURL: WEB_URL,
     trace: 'retain-on-failure',
+    permissions: ['camera', 'microphone'],
+    launchOptions: {
+      args: [
+        // Chromium's built-in pretend camera (a moving test pattern) and microphone (beeps),
+        // so tests make real video calls without any hardware.
+        '--use-fake-device-for-media-stream',
+        // Answer the "allow camera?" prompt automatically.
+        '--use-fake-ui-for-media-stream',
+      ],
+    },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [

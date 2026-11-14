@@ -188,3 +188,30 @@ _(Node version detail refined in D-018: ≥22.12 locally, 24 LTS in production.)
 - **Playwright tests start their own server (port 3101) and web app (port 5273)**, so they never clash with a running `npm run dev`. They run one at a time because they share one matchmaking queue.
 - **Unit tests are named `*.test.ts` next to the source; browser tests are `e2e/*.spec.ts`.** That naming is how vitest and Playwright each pick up only their own.
 - **No React component unit tests.** Logic is tested in the reducer; the real UI is tested end to end in a browser. A fake-browser layer in between would mostly repeat those.
+
+## D-029 — The impolite side always makes the first offer (M4)
+*Accepted · 2026-11-14 · refines D-003*
+- **What happened:** With textbook perfect negotiation, both browsers offered at once at the start of every call (both have a camera to add). The polite side then abandoned its offer and answered, as the pattern says. In the Chromium build Playwright ships, that side's ICE gathering then never finished, it sent no network candidates, and no call ever connected.
+- **How it was pinned down:** A test page with two `RTCPeerConnection`s and none of our code. One side offering: connected. Both offering, then one backing off: stuck in exactly the same way.
+- **Decision:** The polite side does not make the first offer. It waits for the impolite side's offer and includes its camera and microphone in the answer. The collision-handling code stays as a safety net for later renegotiation.
+- **Why not just "caller/callee" without perfect negotiation:** We keep the same roles and the same code, so future features that renegotiate (for example screen sharing) are still covered.
+- **Not verified:** whether real Chrome, Firefox or Safari have the same stall. With this decision it no longer matters at call start.
+
+## D-030 — Side effects live in a controller outside React, driven by "reconcile" (M4)
+*Accepted · 2026-11-14 · extends D-026*
+- **Decision:** `ChatController` (a plain class) owns the socket, the camera and the call. Every event goes through the reducer, then `reconcile()` makes the camera and call match the state. `useChat` only creates the controller and re-renders.
+- **Why:** (1) Timing: a partner's first call-setup message can arrive before React would have run an effect to create the call. (2) Correctness: with "make reality match the state" there is one place that opens and closes things, so no path (Next, Leave, refused request, lost connection, late event) can forget to switch the camera off or close a call. (3) Testability: the controller is unit-tested with fakes, without a browser.
+- **Alternative:** React effects keyed on the session id, as in M3. Rejected for the timing reason, and because cleanup order across several effects is hard to reason about.
+
+## D-031 — A camera is optional, a microphone is required (M4)
+*Accepted · 2026-11-14 · refines D-015*
+- **Decision:** Permission for camera and microphone is still requested at Start. If the device has no camera, the app falls back to microphone only and the user joins with audio. With no microphone at all, the user can't join.
+- **Why:** Many desktop PCs have no webcam, and the brief asks for audio conversations without requiring a camera. A person with neither can't take part in a call at all.
+
+## D-032 — Media behaviour details (M4)
+*Accepted · 2026-11-14*
+- **"Camera off" pauses the track; it doesn't release the camera.** Resuming is instant and needs no renegotiation. The camera light may stay on until Leave; the manual test notes say so.
+- **640×480 is requested**, not HD. Enough for a small chat window, and it keeps TURN data use low.
+- **A failed call does not end the session.** The user is told, text still works, and they can press Next. Automatic recovery (one ICE restart) is M6.
+- **Mic and camera choices carry over to the next partner**, so someone who switched their camera off isn't suddenly on camera after pressing Next.
+- **STUN only for now** (`stun.cloudflare.com`). Calls across restrictive networks need TURN, which is M5.

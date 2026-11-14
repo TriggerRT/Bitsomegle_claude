@@ -14,11 +14,15 @@ function play(...events: ChatEvent[]): ChatState {
 }
 
 const connected: ChatEvent = { type: 'connected' };
-const start: ChatEvent = { type: 'start_requested' };
+const startPressed: ChatEvent = { type: 'start_requested' };
+const mediaReady: ChatEvent = { type: 'media_ready', hasCamera: true };
+/** Pressing Start and then allowing the camera: the normal way into the queue. */
+const begin: ChatEvent[] = [startPressed, mediaReady];
 const matched = (sessionId: string, polite = false): ChatEvent => ({
   type: 'matched',
   sessionId,
   polite,
+  iceServers: [],
 });
 const received = (sessionId: string, text: string): ChatEvent => ({
   type: 'message_received',
@@ -40,11 +44,13 @@ describe('chatReducer', () => {
     });
 
     it('cannot start before the connection is ready', () => {
-      expect(play(start).phase).toBe('idle');
+      expect(play(startPressed).phase).toBe('idle');
     });
 
     it('losing the connection during a chat ends it and says why', () => {
-      const state = play(connected, start, matched('s1'), sent('hi'), { type: 'connection_lost' });
+      const state = play(connected, ...begin, matched('s1'), sent('hi'), {
+        type: 'connection_lost',
+      });
       expect(state).toMatchObject({
         connection: 'reconnecting',
         phase: 'idle',
@@ -59,7 +65,7 @@ describe('chatReducer', () => {
     });
 
     it('reconnecting returns to a usable landing page', () => {
-      const state = play(connected, start, { type: 'connection_lost' }, connected, start);
+      const state = play(connected, ...begin, { type: 'connection_lost' }, connected, ...begin);
       expect(state).toMatchObject({ connection: 'connected', phase: 'waiting', notice: null });
     });
 
@@ -70,11 +76,11 @@ describe('chatReducer', () => {
 
   describe('the main journey', () => {
     it('Start shows the waiting screen straight away', () => {
-      expect(play(connected, start).phase).toBe('waiting');
+      expect(play(connected, ...begin).phase).toBe('waiting');
     });
 
     it('a match opens an empty conversation and remembers the role', () => {
-      expect(play(connected, start, { type: 'waiting' }, matched('s1', true))).toMatchObject({
+      expect(play(connected, ...begin, { type: 'waiting' }, matched('s1', true))).toMatchObject({
         phase: 'in_session',
         sessionId: 's1',
         polite: true,
@@ -83,7 +89,7 @@ describe('chatReducer', () => {
     });
 
     it('messages from both sides appear in order', () => {
-      const state = play(connected, start, matched('s1'), sent('hello'), received('s1', 'hey'));
+      const state = play(connected, ...begin, matched('s1'), sent('hello'), received('s1', 'hey'));
       expect(state.messages.map((m) => [m.from, m.text])).toEqual([
         ['me', 'hello'],
         ['stranger', 'hey'],
@@ -91,7 +97,7 @@ describe('chatReducer', () => {
     });
 
     it('my message is marked sent once the server accepts it', () => {
-      const state = play(connected, start, matched('s1'), sent('hello'), {
+      const state = play(connected, ...begin, matched('s1'), sent('hello'), {
         type: 'message_delivered',
         id: 'out-hello',
       });
@@ -99,7 +105,7 @@ describe('chatReducer', () => {
     });
 
     it('my message is marked failed if the server refuses it', () => {
-      const state = play(connected, start, matched('s1'), sent('hello'), {
+      const state = play(connected, ...begin, matched('s1'), sent('hello'), {
         type: 'message_failed',
         id: 'out-hello',
       });
@@ -107,7 +113,7 @@ describe('chatReducer', () => {
     });
 
     it('Next clears the old conversation and waits for a new partner', () => {
-      const state = play(connected, start, matched('s1'), sent('hello'), {
+      const state = play(connected, ...begin, matched('s1'), sent('hello'), {
         type: 'next_requested',
       });
       expect(state).toMatchObject({ phase: 'waiting', sessionId: null, messages: [] });
@@ -116,7 +122,7 @@ describe('chatReducer', () => {
     it('the next partner never sees or inherits old messages', () => {
       const state = play(
         connected,
-        start,
+        ...begin,
         matched('s1'),
         received('s1', 'old message'),
         { type: 'next_requested' },
@@ -126,7 +132,7 @@ describe('chatReducer', () => {
     });
 
     it('Leave returns to the landing page with nothing left over', () => {
-      const state = play(connected, start, matched('s1'), sent('hello'), {
+      const state = play(connected, ...begin, matched('s1'), sent('hello'), {
         type: 'leave_requested',
       });
       expect(state).toMatchObject({ phase: 'idle', sessionId: null, messages: [] });
@@ -134,7 +140,7 @@ describe('chatReducer', () => {
   });
 
   describe('when the partner leaves', () => {
-    const afterPartnerLeft = play(connected, start, matched('s1'), received('s1', 'bye'), {
+    const afterPartnerLeft = play(connected, ...begin, matched('s1'), received('s1', 'bye'), {
       type: 'session_ended',
       sessionId: 's1',
       reason: 'partner_next',
@@ -169,19 +175,19 @@ describe('chatReducer', () => {
 
   describe('late or out-of-date events from the server', () => {
     it('ignores "matched" that arrives after the user pressed Leave', () => {
-      const state = play(connected, start, { type: 'leave_requested' }, matched('s1'));
+      const state = play(connected, ...begin, { type: 'leave_requested' }, matched('s1'));
       expect(state).toMatchObject({ phase: 'idle', sessionId: null });
     });
 
     it('ignores "waiting" that arrives after the user pressed Leave', () => {
-      const state = play(connected, start, { type: 'leave_requested' }, { type: 'waiting' });
+      const state = play(connected, ...begin, { type: 'leave_requested' }, { type: 'waiting' });
       expect(state.phase).toBe('idle');
     });
 
     it('ignores the ending of a session that is not the current one', () => {
       const state = play(
         connected,
-        start,
+        ...begin,
         matched('s1'),
         { type: 'next_requested' },
         matched('s2'),
@@ -197,7 +203,7 @@ describe('chatReducer', () => {
     it('ignores a message that belongs to an earlier session', () => {
       const state = play(
         connected,
-        start,
+        ...begin,
         matched('s1'),
         { type: 'next_requested' },
         matched('s2'),
@@ -207,32 +213,32 @@ describe('chatReducer', () => {
     });
 
     it('ignores a message that arrives while waiting', () => {
-      const state = play(connected, start, received('s1', 'stray'));
+      const state = play(connected, ...begin, received('s1', 'stray'));
       expect(state.messages).toEqual([]);
     });
 
     it('follows the server when it reports a newer session than the one on screen', () => {
       // Start, Leave, Start in quick succession can deliver an out-of-date "matched"
       // first. Whatever the server says last is the truth.
-      const state = play(connected, start, matched('s1'), matched('s2'));
+      const state = play(connected, ...begin, matched('s1'), matched('s2'));
       expect(state).toMatchObject({ phase: 'in_session', sessionId: 's2', messages: [] });
     });
 
     it('follows the server back to waiting', () => {
-      const state = play(connected, start, matched('s1'), sent('x'), { type: 'waiting' });
+      const state = play(connected, ...begin, matched('s1'), sent('x'), { type: 'waiting' });
       expect(state).toMatchObject({ phase: 'waiting', sessionId: null, messages: [] });
     });
 
     it('a delivery report for a message that is gone changes nothing', () => {
-      const before = play(connected, start, matched('s1'));
+      const before = play(connected, ...begin, matched('s1'));
       expect(chatReducer(before, { type: 'message_delivered', id: 'unknown' })).toEqual(before);
     });
   });
 
   describe('repeated presses', () => {
     it('Start while already waiting changes nothing', () => {
-      const waiting = play(connected, start);
-      expect(chatReducer(waiting, start)).toBe(waiting);
+      const waiting = play(connected, ...begin);
+      expect(chatReducer(waiting, startPressed)).toBe(waiting);
     });
 
     it('Next on the landing page changes nothing', () => {
@@ -241,7 +247,7 @@ describe('chatReducer', () => {
     });
 
     it('Next while already waiting changes nothing', () => {
-      const waiting = play(connected, start);
+      const waiting = play(connected, ...begin);
       expect(chatReducer(waiting, { type: 'next_requested' })).toBe(waiting);
     });
   });
@@ -250,7 +256,7 @@ describe('chatReducer', () => {
     it.each(['closed', 'rate_limited', 'timeout'] as const)(
       'returns to the landing page with the reason "%s"',
       (reason) => {
-        const state = play(connected, start, { type: 'request_refused', reason });
+        const state = play(connected, ...begin, { type: 'request_refused', reason });
         expect(state).toMatchObject({ phase: 'idle', notice: reason });
       },
     );
@@ -258,7 +264,7 @@ describe('chatReducer', () => {
     it('the notice can be dismissed', () => {
       const state = play(
         connected,
-        start,
+        ...begin,
         { type: 'request_refused', reason: 'closed' },
         { type: 'notice_dismissed' },
       );
@@ -266,13 +272,18 @@ describe('chatReducer', () => {
     });
 
     it('starting again clears the notice', () => {
-      const state = play(connected, start, { type: 'request_refused', reason: 'timeout' }, start);
+      const state = play(
+        connected,
+        ...begin,
+        { type: 'request_refused', reason: 'timeout' },
+        ...begin,
+      );
       expect(state).toMatchObject({ phase: 'waiting', notice: null });
     });
   });
 
   it('never changes the state object it was given', () => {
-    const before = play(connected, start, matched('s1'), sent('hi'));
+    const before = play(connected, ...begin, matched('s1'), sent('hi'));
     const snapshot = structuredClone(before);
     chatReducer(before, received('s1', 'yo'));
     chatReducer(before, { type: 'next_requested' });
@@ -302,5 +313,221 @@ describe('isOpenAt', () => {
     const status = { ...base, open: false, opensAt: 1000, closesAt: null };
     expect(isOpenAt(status, 999)).toBe(false);
     expect(isOpenAt(status, 1000)).toBe(true);
+  });
+});
+
+describe('camera and microphone', () => {
+  it('Start first asks for the camera, before any matchmaking', () => {
+    expect(play(connected, startPressed).phase).toBe('requesting_media');
+  });
+
+  it('once allowed, the user starts waiting', () => {
+    expect(play(connected, ...begin)).toMatchObject({ phase: 'waiting', hasCamera: true });
+  });
+
+  it.each(['denied', 'no_device', 'in_use', 'insecure', 'unknown'] as const)(
+    'a "%s" failure shows the problem screen with that reason',
+    (reason) => {
+      const state = play(connected, startPressed, { type: 'media_failed', reason });
+      expect(state).toMatchObject({ phase: 'media_error', mediaError: reason });
+    },
+  );
+
+  it('"Try again" on the problem screen asks for the camera again', () => {
+    const state = play(
+      connected,
+      startPressed,
+      { type: 'media_failed', reason: 'denied' },
+      startPressed,
+    );
+    expect(state).toMatchObject({ phase: 'requesting_media', mediaError: null });
+  });
+
+  it('"Back" on the problem screen returns to the landing page', () => {
+    const state = play(
+      connected,
+      startPressed,
+      { type: 'media_failed', reason: 'denied' },
+      { type: 'leave_requested' },
+    );
+    expect(state).toMatchObject({ phase: 'idle', mediaError: null });
+  });
+
+  it('cancelling during the permission prompt wins over a late "allowed"', () => {
+    const state = play(connected, startPressed, { type: 'leave_requested' }, mediaReady);
+    expect(state.phase).toBe('idle');
+  });
+
+  it('cancelling during the permission prompt wins over a late failure', () => {
+    const state = play(
+      connected,
+      startPressed,
+      { type: 'leave_requested' },
+      { type: 'media_failed', reason: 'denied' },
+    );
+    expect(state).toMatchObject({ phase: 'idle', mediaError: null });
+  });
+
+  it('a device without a camera joins with audio only', () => {
+    const state = play(connected, startPressed, { type: 'media_ready', hasCamera: false });
+    expect(state).toMatchObject({
+      phase: 'waiting',
+      hasCamera: false,
+      localMedia: { audio: true, video: false },
+    });
+  });
+
+  it('the camera button does nothing on a device without a camera', () => {
+    const state = play(
+      connected,
+      startPressed,
+      { type: 'media_ready', hasCamera: false },
+      { type: 'camera_toggled' },
+    );
+    expect(state.localMedia.video).toBe(false);
+  });
+
+  it('mic and camera can be switched off and on independently', () => {
+    const micOff = play(connected, ...begin, { type: 'mic_toggled' });
+    expect(micOff.localMedia).toEqual({ audio: false, video: true });
+
+    const bothOff = chatReducer(micOff, { type: 'camera_toggled' });
+    expect(bothOff.localMedia).toEqual({ audio: false, video: false });
+
+    const micBackOn = chatReducer(bothOff, { type: 'mic_toggled' });
+    expect(micBackOn.localMedia).toEqual({ audio: true, video: false });
+  });
+
+  it('my mic and camera choices carry over to the next partner', () => {
+    const state = play(
+      connected,
+      ...begin,
+      matched('s1'),
+      { type: 'camera_toggled' },
+      { type: 'next_requested' },
+      matched('s2'),
+    );
+    expect(state.localMedia).toEqual({ audio: true, video: false });
+  });
+});
+
+describe("the partner's camera and microphone", () => {
+  const partnerMedia = (sessionId: string, audio: boolean, video: boolean): ChatEvent => ({
+    type: 'partner_media',
+    sessionId,
+    audio,
+    video,
+  });
+
+  it('are assumed on until the partner says otherwise', () => {
+    expect(play(connected, ...begin, matched('s1')).partnerMedia).toEqual({
+      audio: true,
+      video: true,
+    });
+  });
+
+  it('follow what the partner reports', () => {
+    const state = play(connected, ...begin, matched('s1'), partnerMedia('s1', true, false));
+    expect(state.partnerMedia).toEqual({ audio: true, video: false });
+  });
+
+  it('are reset for a new partner', () => {
+    const state = play(
+      connected,
+      ...begin,
+      matched('s1'),
+      partnerMedia('s1', false, false),
+      { type: 'next_requested' },
+      matched('s2'),
+    );
+    expect(state.partnerMedia).toEqual({ audio: true, video: true });
+  });
+
+  it('ignore a report that belongs to an earlier session', () => {
+    const state = play(
+      connected,
+      ...begin,
+      matched('s1'),
+      { type: 'next_requested' },
+      matched('s2'),
+      partnerMedia('s1', false, false),
+    );
+    expect(state.partnerMedia).toEqual({ audio: true, video: true });
+  });
+});
+
+describe('the video call connection', () => {
+  const callState = (
+    sessionId: string,
+    call: 'connecting' | 'connected' | 'failed',
+  ): ChatEvent => ({
+    type: 'call_state',
+    sessionId,
+    call,
+  });
+
+  it('starts as connecting and remembers the call-setup servers', () => {
+    const iceServers = [{ urls: 'stun:example.org' }];
+    const state = play(connected, ...begin, {
+      type: 'matched',
+      sessionId: 's1',
+      polite: true,
+      iceServers,
+    });
+    expect(state).toMatchObject({ call: 'connecting', iceServers });
+  });
+
+  it('becomes connected, and can fail', () => {
+    const live = play(connected, ...begin, matched('s1'), callState('s1', 'connected'));
+    expect(live.call).toBe('connected');
+    expect(chatReducer(live, callState('s1', 'failed')).call).toBe('failed');
+  });
+
+  it('a failed call does not end the chat: text still works', () => {
+    const state = play(
+      connected,
+      ...begin,
+      matched('s1'),
+      callState('s1', 'failed'),
+      received('s1', 'can you see me?'),
+    );
+    expect(state).toMatchObject({ phase: 'in_session', sessionId: 's1' });
+    expect(state.messages).toHaveLength(1);
+  });
+
+  it('starts fresh as connecting for each new partner', () => {
+    const state = play(
+      connected,
+      ...begin,
+      matched('s1'),
+      callState('s1', 'connected'),
+      { type: 'next_requested' },
+      matched('s2'),
+    );
+    expect(state.call).toBe('connecting');
+  });
+
+  it('ignores a late report from the previous call', () => {
+    const state = play(
+      connected,
+      ...begin,
+      matched('s1'),
+      { type: 'next_requested' },
+      matched('s2'),
+      callState('s1', 'failed'),
+    );
+    expect(state.call).toBe('connecting');
+  });
+
+  it('ignores reports after the partner has left', () => {
+    const state = play(
+      connected,
+      ...begin,
+      matched('s1'),
+      callState('s1', 'connected'),
+      { type: 'session_ended', sessionId: 's1', reason: 'partner_left' },
+      callState('s1', 'failed'),
+    );
+    expect(state).toMatchObject({ phase: 'partner_left', call: 'connected' });
   });
 });

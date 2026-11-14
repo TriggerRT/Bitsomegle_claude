@@ -88,13 +88,15 @@ Exchanging offers, answers and ICE candidates is called **signaling**. WebRTC do
 
 TURN needs a username and password. Our server asks Cloudflare's API for **short-lived credentials** (~4 h) and hands them to the browser at match time. The long-lived Cloudflare API key never leaves the server.
 
-### 2.4 "Perfect negotiation" (polite and impolite peers)
-If both browsers create an offer at the same time ("glare"), the setup breaks. That was a real bug in the old `reference/omegle_2027` code. The standard fix from the WebRTC spec authors is **perfect negotiation**:
-- One peer is **polite**: on a collision, it backs off and accepts the other's offer.
-- One peer is **impolite**: on a collision, it ignores the incoming offer and keeps its own.
-- The server decides the roles when it creates the session (one of each), so the two never disagree.
+### 2.4 Who offers first, and "perfect negotiation"
+To start a call, one browser sends an **offer** and the other replies with an **answer**. In Bitsomeggle both browsers have a camera to share, so left alone both would send an offer at the same moment. Two offers crossing is called a collision, or "glare". That was a real bug in the old `reference/omegle_2027` code.
 
-Both peers can then use the same code, and renegotiation (for example, turning the camera back on) just works.
+The server gives the two browsers opposite roles when it creates the session, one **polite** and one **impolite**, and we use them in two ways:
+
+1. **The impolite side always makes the first offer. The polite side waits for it** and sends its camera and microphone in the answer. So a collision can't happen when a call starts.
+2. **Later collisions** are handled by the standard "perfect negotiation" pattern from the WebRTC spec authors: the polite side drops its own offer and accepts the other one, and the impolite side ignores the incoming offer. Nothing in the app renegotiates today (the mic and camera buttons only pause tracks), so this is a safety net for future features.
+
+Rule 1 exists because of something found while testing M4 (DECISIONS D-029): when the polite side has to abandon its own offer, Chromium stops gathering network routes for that connection and the call never connects. Avoiding the collision avoids the problem.
 
 ### 2.5 Session IDs as version numbers (stale events)
 Every conversation gets a fresh random `sessionId`. Every in-session message in both directions carries it. Example of the problem it solves:
@@ -223,7 +225,7 @@ Client-to-server payloads are **zod schemas**, checked on the server for every m
 |---|---|
 | `status` | `{open, opensAt, closesAt, online}` (sent on connect) |
 | `queue:waiting` | none |
-| `session:matched` | `{sessionId, polite}` (`iceServers` is added in M4/M5) |
+| `session:matched` | `{sessionId, polite, iceServers}`. `iceServers` is the STUN/TURN list for the call (STUN only until M5) |
 | `session:ended` | `{sessionId, reason: 'partner_next' \| 'partner_left' \| 'partner_disconnected'}` |
 | `chat:message` | `{sessionId, text, at}` |
 | `signal` | same as the client's payload |
@@ -242,17 +244,26 @@ Client-to-server payloads are **zod schemas**, checked on the server for every m
 ## 5. Web app design
 
 ### 5.1 Modules
-_Text-only version implemented in M3. Video parts arrive in M4._
+| Module | Responsibility |
+|---|---|
+| `state/chatMachine.ts` | Pure reducer: `(state, event) → state`. The single source of truth for which screen we're on, what's switched on, and the call status. Unit-tested without a browser |
+| `services/chatController.ts` | Plain class, no React. Turns everything that happens into reducer events, then **reconciles**: makes the camera and the video call match the new state. Unit-tested with a fake socket, camera and call |
+| `services/socket.ts` | Creates the Socket.IO client, typed with the shared contract; works out the server address |
+| `services/localMedia.ts` | Asks for camera + microphone, maps browser errors to reasons, falls back to audio only, stops tracks |
+| `services/peer.ts` | One `RTCPeerConnection` per session: who offers first, perfect negotiation, call state |
+| `hooks/useChat.ts` | Creates a controller with the real services and re-renders React when it publishes a change |
+| `components/` | `Landing`, `MediaSetup` (permission prompt and problems), `Waiting` (with self-preview), `Conversation`, `VideoTile`, `MediaControls`, `ChatPanel` |
+| `e2e/` | Playwright tests that drive real browser windows, with Chromium's pretend camera, against a real server |
 
-| Module | Responsibility | Status |
-|---|---|---|
-| `state/chatMachine.ts` | Pure reducer: `(state, event) → state`. The single source of truth for which screen we're on. Unit-tested without a browser | M3 |
-| `services/socket.ts` | Creates the Socket.IO client, typed with the shared contract; works out the server address | M3 |
-| `hooks/useChat.ts` | Connects socket + reducer to React. Forwards server events to the reducer; sends user actions to both the reducer and the server. Makes no decisions itself | M3 |
-| `components/` | `Landing` (with opening-hours countdown), `Waiting`, `Conversation`, `ChatPanel` | M3 |
-| `services/localMedia.ts` | `getUserMedia` once at Start; mute/unmute; stop all tracks on Leave or tab close | M4 |
-| `services/peer.ts` | One `RTCPeerConnection` per session; perfect negotiation; ICE restart once on failure | M4 |
-| `e2e/` | Playwright tests that drive real browser windows against a real server | M3 |
+**Why a controller outside React (D-030).** The first call-setup message from the partner can arrive a few milliseconds after "you are matched". React runs its effects a little later, after drawing the screen. The controller reacts to each event immediately, so the call exists before the next message is handled.
+
+**Reconcile.** After every event the controller compares the world with the state and fixes the difference:
+1. Camera and microphone are held from Start until the user is back on the landing page. They stay on between partners.
+2. Track on/off follows the mic and camera buttons.
+3. Exactly one call exists while `in_session`, for that session id. Any other call is closed first.
+4. The partner is told our mic/camera state once per change.
+
+There is no separate "when X happens, also do Y" code, so nothing can be forgotten on an unusual path.
 
 ### 5.2 UI state machine
 The state has two independent parts.
@@ -261,12 +272,15 @@ The state has two independent parts.
 
 **Phase** (what the user is doing):
 ```
-            Start                 matched
-   idle ───────────► waiting ───────────────► in_session
-    ▲                 ▲   ▲                    │      │
-    │ Leave / Cancel  │   └────── Next ────────┘      │ partner ended it
-    │ refused         │                               ▼
-    └─────────────────┴────────── Next ────────── partner_left
+  Start               allowed           matched
+idle ──► requesting_media ──► waiting ──────────► in_session
+               │               ▲  ▲                │    │
+               │ refused       │  └───── Next ─────┘    │ partner ended it
+               ▼               │                        ▼
+          media_error          └──────── Next ──── partner_left
+          (Try again → requesting_media)
+
+Back to idle from any state: Leave, Cancel, Back, server refused, connection lost.
 ```
 - **Optimistic updates:** pressing Start or Next changes the screen immediately, before the server answers, so the app feels instant.
 - **If the server says no** (closed, too fast, or no reply within 8 s), the app returns to the landing page with a notice **and sends `leave`**, so the server also forgets us. The two sides can't disagree about whether we're in a chat.
@@ -275,18 +289,26 @@ The state has two independent parts.
 - **Connection lost:** any chat is over (a new connection is a fresh start on the server), and the landing page says why. Socket.IO reconnects by itself.
 - **partner_left** keeps the old messages readable but the message box is disabled. Messages are cleared on Next, Leave or a new match.
 - **Opening hours:** the landing page works out open/closed from the last `status` and a 1-second clock, so it flips at the right moment without asking the server. The server still refuses a Start while closed.
-- _M4 adds:_ `requesting_media` and `media_error` before waiting.
+- **Camera first (M4):** Start goes to `requesting_media`. Allowed → `waiting`. Refused or failed → `media_error` with a reason, where "Try again" asks again and "Back" returns to `idle`. Cancelling while the browser prompt is open wins over a late "Allow": the camera is switched straight off.
+- **Per-session extras (M4):** `partnerMedia` (assumed on until the partner says otherwise), `call` (`connecting` / `connected` / `failed`) and `iceServers`. All reset for each new partner, and all ignore reports that name another session.
+- **`localMedia` (my mic and camera choices) is not per session:** it carries over to the next partner.
 
 ### 5.3 Media lifecycle
-- **Permission is requested at Start.** Camera and mic access is required to enter, because it's a video app. If denied → `media_error` screen explaining how to re-enable it in the browser.
-- **Tracks are kept across Next.** No re-prompt and no camera flicker. Only the `RTCPeerConnection` is replaced.
-- **Leave / tab close** → `track.stop()` on every track (camera light goes off), close the peer connection, disconnect cleanly.
-- **Camera/mic toggles** set `track.enabled = false/true` and emit `media:state`, so the partner sees a "Camera off" or "Muted" placeholder.
-- **Connection failure:** ICE restart once → if still failing, end the session and re-queue. A media failure never corrupts matchmaking state.
-- **Chat messages are cleared** whenever the session changes.
+_Implemented in M4._
+- **Permission is requested at Start**, before joining the queue. Nobody is matched who can't take part.
+- **Problems are explained.** Browser errors are mapped to five reasons (`denied`, `no_device`, `in_use`, `insecure`, `unknown`), each with its own instructions.
+- **No camera is fine; no microphone is not.** If the device has no camera, the app retries with the microphone alone and the user joins with audio only. The partner sees "Stranger's camera is off."
+- **Tracks are kept across Next.** No second prompt and no camera flicker. Only the `RTCPeerConnection` is replaced.
+- **Leave, Cancel, a refused request or a lost connection** → every track is stopped (the camera light goes off) and the call is closed.
+- **Mic and camera buttons** set `track.enabled`. A paused camera sends black frames and can resume instantly; the devices stay reserved until Leave. `media:state` tells the partner, who sees "Stranger's camera is off." or "Stranger is muted".
+- **Picture size** is requested as 640×480 to keep calls smooth on weak Wi-Fi and TURN data use low.
+- **Call states:** "Connecting video…" until connected. If no path is found the screen says so, **the chat stays open** and text still works; the user can press Next. A media failure never changes matchmaking state.
+- _M6 adds:_ one automatic ICE restart before giving up.
 
 ### 5.4 Layout
-Remote video large, local video small (picture-in-picture), text chat panel always visible (side panel on desktop, bottom sheet on mobile), and Next as the most prominent button.
+- **Desktop:** partner's video large on the left with your own mirrored picture in its corner; text chat in a side panel on the right; Mute, Camera, Leave and Next under the video.
+- **Narrow screens (under 800 px):** video on top, text chat underneath, the four buttons in one row.
+- **Waiting screen:** your own camera preview, so you can check how you look before anyone sees you.
 
 ---
 

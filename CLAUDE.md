@@ -4,12 +4,12 @@ Anonymous 1:1 video chat with random matching and a Next button, for BITS Pilani
 The full product brief is in [docs/MASTER_PROMPT.md](docs/MASTER_PROMPT.md); read it before making architectural changes.
 
 ## Current phase
-M0 (tooling), M1 (matchmaking core), M2 (realtime server) and M3 (web app, text chat only) are done and tested. Two browser windows can match, chat and press Next. Next milestone: **M4, video and audio (WebRTC)**. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/TODO.md](docs/TODO.md).
+M0 to M4 are done: tooling, matchmaking core, realtime server, web app with text chat, and peer-to-peer video and audio. All automated tests pass; M4 still has manual tests waiting on the user (`docs/MANUAL_TESTS.md`). Next milestone: **M5, deploy a beta and add TURN**. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/TODO.md](docs/TODO.md).
 
 ## Stack (decided — see docs/DECISIONS.md for reasons)
 - **Web:** Vite + React + TypeScript SPA → Vercel (free).
 - **Server:** Node.js (≥22.12; 24 LTS in production) + TypeScript 7 + Socket.IO 4.8, `zod`, `pino` → Render free tier (Singapore). 
-- **Media:** raw WebRTC peer-to-peer, "perfect negotiation" pattern; Cloudflare STUN + TURN (credentials minted by the server).
+- **Media:** raw WebRTC peer-to-peer; Cloudflare STUN today, TURN in M5 (credentials minted by the server).
 - **Text chat:** relayed through Socket.IO (never stored, never logged).
 - **State:** in-memory on a single server instance. No Redis, no database (yet).
 - **Tests:** vitest (unit + simulated-client integration), Playwright with Chromium fake camera/mic.
@@ -53,7 +53,10 @@ Node ≥ 22.12 required (CI also tests Node 24, the production target).
 - After changing `matchmaking/` or `socket/`, break the code on purpose once and confirm a test fails.
 
 ## Working on the web app
-- All chat behaviour goes in `state/chatMachine.ts` (pure reducer) with a unit test. `hooks/useChat.ts` only forwards events and sends requests; components only render.
+- Decisions go in `state/chatMachine.ts` (pure reducer) with a unit test. Side effects (socket, camera, call) go in `services/chatController.ts`, whose `reconcile()` makes them match the state after every event; test it with the fakes in `chatController.test.ts`. `hooks/useChat.ts` only creates the controller; components only render.
+- **WebRTC:** the impolite side makes the first offer and the polite side waits (DECISIONS D-029). Do not make both sides offer at call start: Chromium stalls after the resulting rollback. One `RTCPeerConnection` per session, never reused.
+- The camera must be off whenever the user is on the landing page. Any new way of getting there must be covered by a test that checks the tracks are stopped.
+- Browser tests use Chromium's pretend camera (`playwright.config.ts`). To simulate a blocked or missing camera, replace `getUserMedia` through `openPerson(browser, beforeLoad)`.
 - Server events can arrive late. The reducer must ignore `waiting`/`matched` unless the user is waiting or in a chat, and ignore `session_ended`/messages for any session but the current one.
 - If the server refuses Start or Next, go idle AND send `leave` (DECISIONS D-026).
 - Unit tests: `src/**/*.test.ts` (vitest). Browser tests: `e2e/*.spec.ts` (Playwright); find elements by role and visible text, as a user would.
@@ -75,7 +78,7 @@ Node ≥ 22.12 required (CI also tests Node 24, the production target).
 - The user is a student who is still learning. **Explain important decisions in plain language**: concept first, why we need it, how we use it, a Bitsomeggle example. Explain jargon.
 - Give honest technical pushback; recommend one option when there are trade-offs.
 - Status words are strict: **Implemented / Tested / Partially tested / Untested / Needs manual test / Blocked**. Never say something works without having run it.
-- For anything needing real devices (camera, mobile, campus Wi-Fi), write a step-by-step manual checklist (what to do, what they should see, what to report back) and mark it "Needs manual test" until the user confirms.
+- Manual tests live in `docs/MANUAL_TESTS.md`. For anything needing real devices (camera, mobile, campus Wi-Fi), write a step-by-step manual checklist (what to do, what they should see, what to report back) and mark it "Needs manual test" until the user confirms.
 
 ## Keep the docs current
 After any meaningful change, update the relevant files in `docs/`:

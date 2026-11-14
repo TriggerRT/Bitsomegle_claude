@@ -1,31 +1,16 @@
-import { type Browser, expect, type Page, test } from '@playwright/test';
-
-/**
- * Each "person" gets their own browser context, which is like a separate private window:
- * nothing is shared between them except the server.
- */
-async function openPerson(browser: Browser): Promise<Page> {
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  await page.goto('/');
-  await expect(page.getByRole('button', { name: 'Start chatting' })).toBeEnabled();
-  return page;
-}
-
-const startButton = (page: Page) => page.getByRole('button', { name: 'Start chatting' });
-const nextButton = (page: Page) => page.getByRole('button', { name: 'Next' });
-const leaveButton = (page: Page) => page.getByRole('button', { name: 'Leave' });
-const messageBox = (page: Page) => page.getByRole('textbox', { name: 'Message' });
-const messages = (page: Page) => page.locator('.message');
-
-async function say(page: Page, text: string): Promise<void> {
-  await messageBox(page).fill(text);
-  await messageBox(page).press('Enter');
-}
-
-const expectWaiting = (page: Page) => expect(page.getByText('Looking for someone…')).toBeVisible();
-const expectChatting = (page: Page) =>
-  expect(page.getByText("You're chatting with a stranger.")).toBeVisible();
+import { expect, type Page, test } from '@playwright/test';
+import {
+  closeEveryone,
+  expectChatting,
+  expectWaiting,
+  leaveButton,
+  messageBox,
+  messages,
+  nextButton,
+  openPerson,
+  say,
+  startButton,
+} from './helpers.ts';
 
 /** Marks the page so we can prove later that it was never reloaded. */
 async function markPage(page: Page): Promise<void> {
@@ -36,10 +21,7 @@ async function markPage(page: Page): Promise<void> {
 const wasNeverReloaded = (page: Page): Promise<boolean> =>
   page.evaluate(() => (window as unknown as { neverReloaded?: boolean }).neverReloaded === true);
 
-test.afterEach(async ({ browser }) => {
-  // Close every window so nobody is left in the queue for the next test.
-  await Promise.all(browser.contexts().map((context) => context.close()));
-});
+test.afterEach(async ({ browser }) => closeEveryone(browser));
 
 test('full journey: start, match, chat, Next, match again, leave', async ({ browser }) => {
   const alice = await openPerson(browser);

@@ -1,16 +1,16 @@
 # Bitsomeggle — Project Status
 
-_Last updated: 2026-11-14 (after M3)_
+_Last updated: 2026-11-14 (after M4)_
 
 ## Phase
-**M3 (text chat working in the browser) complete.** You can run it locally and chat between two windows. Next: **M4: video and audio** (see [TODO.md](TODO.md)).
+**M4 (video and audio) complete in automated tests; real-device checks are waiting on you** ([MANUAL_TESTS.md](MANUAL_TESTS.md)). Next: **M5: deploy a beta and add the TURN relay** (see [TODO.md](TODO.md)).
 
 ## What exists
 | Item | Status |
 |---|---|
 | Product brief ([MASTER_PROMPT.md](MASTER_PROMPT.md)) | Done |
-| Architecture ([ARCHITECTURE.md](ARCHITECTURE.md)) | Server (§3, §4) and text-only web app (§5.1–5.2) implemented; media (§5.3) not started |
-| Decision log ([DECISIONS.md](DECISIONS.md)) | D-001 … D-028 |
+| Architecture ([ARCHITECTURE.md](ARCHITECTURE.md)) | Server (§3, §4) and web app (§5) implemented |
+| Decision log ([DECISIONS.md](DECISIONS.md)) | D-001 … D-032 |
 | `CLAUDE.md` (repo root) | Done |
 | Git repository | Branch `main`, pushed to private GitHub repo `TriggerRT/Bitsomegle_claude` |
 | npm workspaces: `packages/shared`, `apps/server`, `apps/web` | Implemented, tested |
@@ -23,7 +23,9 @@ _Last updated: 2026-11-14 (after M3)_
 | Structured logging (pino), no content logged | Implemented; a live run confirmed chat text does not appear in the log |
 | Web app, text only: landing, waiting, conversation, partner-left screens; Start / Next / Leave / Cancel; opening-hours countdown; reconnect handling | Implemented, tested (unit + browser tests). Looked at in a browser at desktop and phone width |
 | UI state machine (`apps/web/src/state/chatMachine.ts`) | Implemented, tested |
-| Browser tests (Playwright, `apps/web/e2e/`) | Implemented; pass locally. CI job added, **untested until pushed** |
+| Video and audio: camera/mic permission and problem screens, peer-to-peer call, self-preview, mute and camera buttons, audio-only fallback | Implemented, tested with a pretend camera in real browser windows. **Needs manual test** with a real camera, microphone and speaker |
+| Chat controller (`apps/web/src/services/chatController.ts`) | Implemented, tested |
+| Browser tests (Playwright, `apps/web/e2e/`) | Implemented, tested: pass locally and in CI (confirmed by user) |
 | `npm run dev` (server + web together) | Implemented, tested by running it |
 | Tooling: TypeScript 7, Biome, vitest 5, Vite 8 | Implemented; lint/typecheck/build/test all pass after a clean `npm ci` |
 | GitHub Actions CI (Node 22 + 24) | Implemented, tested: both jobs green on the first push (confirmed by user) |
@@ -36,7 +38,7 @@ Status words: Implemented / Tested / Partially tested / Untested / Needs manual 
 | Anonymous random matchmaking | Tested end to end in real browser windows (M3) |
 | Session lifecycle + stale-event guards | Tested on server and client |
 | Text chat | Tested end to end (M3) |
-| Video/audio (WebRTC P2P) | Server relays call-setup messages: tested (M2). Browser side: M4 |
+| Video/audio (WebRTC P2P) | Tested end to end with a pretend camera (M4). **Needs manual test** on real hardware. Same-network only until TURN (M5) |
 | Next button | Tested end to end, no page reload (M3) |
 | Waiting / matched / partner-left states | Tested end to end (M3). Closed-hours and server-full screens: logic unit-tested, **not yet seen in a browser** |
 | TURN relay | Not started |
@@ -52,6 +54,22 @@ Status words: Implemented / Tested / Partially tested / Untested / Needs manual 
 - Bug-injection check: 9 deliberate bugs were added one at a time (stale guard removed, partner left in queue, half-ended session, duplicate join, ghost left in queue, two impolite peers, avoid list ignored, fallback removed, client not deleted). The tests failed for all 9. The original code was then restored.
 - Coverage of `matchmaking/`: every line of real logic runs in tests. The only lines not run are the "this should never happen" alarms.
 
+## Test evidence (M4)
+- 295 unit and integration tests pass (`npm test`): 62 new for the web app (37 for the controller, 25 for the state machine) and 1 for the server.
+- 17 browser tests pass (`npm run e2e`), 3 runs in a row. The 12 new ones make real WebRTC calls between Chromium windows using its pretend camera and microphone:
+  - both people receive moving video and an audio track; the self-preview is silent;
+  - Next gives a different video stream from the new partner, three times in a row;
+  - after Leave or Cancel, every camera and microphone track the page ever obtained is ended, and going through several partners asked for the camera only once;
+  - after Next or Leave, the connection to the previous partner is closed on both sides;
+  - camera off and mute are shown to the partner and really disable the tracks;
+  - a camera switched off while waiting is off for the new partner from the first moment;
+  - blocked camera → help screen and not queued; "Try again" works; no camera → audio only; no microphone → told what to do.
+- Bug-injection check: 9 deliberate bugs in the video code (both sides offering first, old call not closed, camera never switched off, old partner's setup messages reaching the new call, cosmetic-only camera button, camera never sent, partner not told, connection never closed, cancelled prompt still joining). 8 were caught at once. The 9th (connection never closed) exposed a gap, so a browser test was added that checks old connections are closed; it now catches that bug too.
+- A real fault was found and fixed this way: see D-029.
+- **Not verified (needs you):** a real camera, microphone and speaker; echo; picture quality. See [MANUAL_TESTS.md](MANUAL_TESTS.md), tests M4-1 to M4-8.
+- **Not verified until deployment:** phones, Safari, Firefox, two different networks.
+- The CI run for M4 has not happened yet (nothing pushed).
+
 ## Test evidence (M3)
 - 232 unit and integration tests pass (`npm test`): 48 new for the web app (40 for the state machine).
 - 5 browser tests pass (`npm run e2e`), 3 runs in a row. Real Chromium windows against a real server:
@@ -62,7 +80,7 @@ Status words: Implemented / Tested / Partially tested / Untested / Needs manual 
   5. Whitespace-only messages are not sent.
 - Bug-injection check: 6 deliberate bugs in the web app. 5 were caught (2 by browser tests, 3 by unit tests). The 6th, ignoring the server's `queue:waiting` event, changes nothing visible because the screen already shows "waiting" optimistically, so no test can or should fail.
 - Looked at in a browser: landing page and an active conversation, at desktop and phone width.
-- **Not verified:** real phones, Safari and Firefox, slow or flaky networks, the closed-hours and server-full screens in a real browser. The CI browser job has not run yet.
+- **Not verified:** real phones, Safari and Firefox, slow or flaky networks, the closed-hours and server-full screens in a real browser.
 
 ## Test evidence (M2)
 - 184 tests pass (`npm test`): 127 new in M2, of which 63 are integration tests.
@@ -77,6 +95,8 @@ Status words: Implemented / Tested / Partially tested / Untested / Needs manual 
 - Not covered by automated tests: `index.ts` (the 30-line start-up file), checked by the live run instead.
 
 ## Known issues / risks
+- Calls use STUN only. Two people on networks that block direct connections (some campus and mobile networks) will see "Couldn't connect video" until TURN is added in M5. Text chat still works for them.
+- Two windows on one laptop share one microphone and speaker, so testing that way echoes unless you wear headphones.
 - Opening the dev site from another device (phone on the same Wi-Fi) is refused by the server's CORS rule until `CORS_ORIGIN` in `apps/server/.env` includes that address. Covered in the M4 manual-test checklist.
 - The web bundle is about 108 KB compressed, partly because the validation library (zod) is bundled although the browser doesn't use it yet. To trim in M7.
 - The "online" number is sent once when a browser connects and does not update live (M7).
