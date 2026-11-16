@@ -23,6 +23,11 @@ export interface ServerConfig {
    * address. null means there is no proxy: use the address of the connection itself.
    */
   clientIpHeader: string | null;
+  /**
+   * How long (ms) a call is kept for someone whose connection dropped, in case they come
+   * straight back. 0 = a dropped connection ends the call immediately.
+   */
+  reconnectGraceMs: number;
   /** Cloudflare TURN key for relayed calls. null means STUN only (no relay). */
   turn: TurnConfig | null;
   logLevel: LogLevel;
@@ -36,6 +41,7 @@ export interface TurnConfig {
 
 const DEFAULT_PORT = 3001;
 const DEFAULT_MAX_CLIENTS = 1000;
+const DEFAULT_RECONNECT_GRACE_MS = 10_000;
 /** Where the Vite dev server runs. Only used when CORS_ORIGIN is not set, outside production. */
 const DEV_CORS_ORIGIN = 'http://localhost:5173';
 
@@ -47,6 +53,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     maxClients: parseInteger('MAX_CLIENTS', env.MAX_CLIENTS, DEFAULT_MAX_CLIENTS, 1, 100_000),
     maxClientsPerIp: parseInteger('MAX_CLIENTS_PER_IP', env.MAX_CLIENTS_PER_IP, 0, 0, 100_000),
     clientIpHeader: parseHeaderName(env.CLIENT_IP_HEADER),
+    reconnectGraceMs: parseInteger(
+      'RECONNECT_GRACE_MS',
+      env.RECONNECT_GRACE_MS,
+      DEFAULT_RECONNECT_GRACE_MS,
+      0,
+      60_000,
+    ),
     turn: parseTurn(env.TURN_KEY_ID, env.TURN_KEY_API_TOKEN),
     logLevel: parseLogLevel(env.LOG_LEVEL),
   };

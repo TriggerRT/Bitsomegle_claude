@@ -1,4 +1,8 @@
-import type { ClientToServerEvents, ServerToClientEvents } from '@bitsomeggle/shared';
+import {
+  type ClientToServerEvents,
+  RESUME_PROTOCOL,
+  type ServerToClientEvents,
+} from '@bitsomeggle/shared';
 import { io, type Socket } from 'socket.io-client';
 
 /**
@@ -14,10 +18,12 @@ export const REQUEST_TIMEOUT_MS = 8000;
  * Creates the socket without connecting yet (the caller attaches its listeners first,
  * then calls `connect()`, so no early event can be missed).
  *
- * If the connection drops, Socket.IO keeps retrying by itself with growing pauses.
+ * If the connection drops, Socket.IO keeps retrying by itself with growing pauses. When
+ * it gets back within a few seconds the server restores it as the same connection
+ * (`socket.recovered` is then true) and delivers what was missed.
  */
 export function createChatSocket(serverUrl: string): ChatSocket {
-  return io(serverUrl, { autoConnect: false });
+  return io(serverUrl, { autoConnect: false, auth: { protocol: RESUME_PROTOCOL } });
 }
 
 /**

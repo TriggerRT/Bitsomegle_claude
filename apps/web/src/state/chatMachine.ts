@@ -111,6 +111,8 @@ export type ChatEvent =
   // Connection
   | { type: 'connected' }
   | { type: 'connection_lost' }
+  /** The server no longer has the chat we think we are in (too long away, or restarted). */
+  | { type: 'session_lost' }
   | { type: 'server_full' }
   | { type: 'status'; status: StatusPayload }
   // User actions
@@ -178,17 +180,18 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
     case 'connected':
       return { ...state, connection: 'connected' };
 
-    case 'connection_lost': {
-      // A new connection is a fresh start on the server, so any chat is over.
-      const wasBusy = state.phase !== 'idle' && state.phase !== 'media_error';
-      return {
-        ...state,
-        ...NO_SESSION,
-        connection: 'reconnecting',
-        phase: wasBusy ? 'idle' : state.phase,
-        notice: wasBusy ? 'connection_lost' : state.notice,
-      };
-    }
+    case 'connection_lost':
+      // Nothing else changes yet. A short drop is normal on Wi-Fi and phones: the server
+      // keeps a chat for a few seconds, and the video goes directly between the two
+      // browsers, so it often keeps playing. What happens next is decided when the
+      // connection is back: either nothing ("connected") or "session_lost".
+      return { ...state, connection: 'reconnecting' };
+
+    case 'session_lost':
+      // Only a running chat can be lost. Someone who was waiting simply joins the queue
+      // again (the controller does that), and the other screens need no server.
+      if (state.phase !== 'in_session') return state;
+      return { ...state, ...NO_SESSION, phase: 'idle', notice: 'connection_lost' };
 
     case 'server_full':
       return { ...state, ...NO_SESSION, connection: 'full', phase: 'idle', mediaError: null };

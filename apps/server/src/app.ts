@@ -5,7 +5,11 @@ import { createHttpServer } from './http.ts';
 import { Matchmaker } from './matchmaking/Matchmaker.ts';
 import { getOpenStatus } from './schedule/openHours.ts';
 import { DEFAULT_RATE_LIMITS, type RateLimits } from './socket/rateLimit.ts';
-import { attachSocketServer, type SocketServer } from './socket/socketServer.ts';
+import {
+  attachSocketServer,
+  type SocketServer,
+  STATUS_INTERVAL_MS,
+} from './socket/socketServer.ts';
 import { createCloudflareTurnSource } from './turn/cloudflareTurn.ts';
 import { createStunOnlySource, type IceServerSource } from './turn/iceServers.ts';
 
@@ -24,6 +28,8 @@ export interface App {
 export interface AppOverrides {
   now?: () => number;
   rateLimits?: RateLimits;
+  /** How often the status is sent to every browser. */
+  statusIntervalMs?: number;
   /** Stands in for the real internet when the server asks Cloudflare for TURN credentials. */
   fetch?: typeof fetch;
 }
@@ -53,6 +59,8 @@ export function createApp(config: ServerConfig, overrides: AppOverrides = {}): A
     maxClientsPerIp: config.maxClientsPerIp,
     clientIpHeader: config.clientIpHeader,
     rateLimits: overrides.rateLimits ?? DEFAULT_RATE_LIMITS,
+    reconnectGraceMs: config.reconnectGraceMs,
+    statusIntervalMs: overrides.statusIntervalMs ?? STATUS_INTERVAL_MS,
     getIceServers: iceServers.getIceServers,
     logger,
     now,

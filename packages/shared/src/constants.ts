@@ -19,3 +19,11 @@ export const SDP_MAX_LENGTH = 20_000;
 
 /** Longest single ICE candidate line the server will relay. Real ones are around 100 to 200. */
 export const ICE_CANDIDATE_MAX_LENGTH = 1000;
+
+/**
+ * Announced by the web app when it connects ("auth.protocol"). From this number on, the
+ * app understands that a call can be kept across a short connection drop. The server
+ * only keeps calls for browsers that announce it; an older copy of the app (a tab left
+ * open across an update) ends its call on any drop, and the server must do the same.
+ */
+export const RESUME_PROTOCOL = 2;

@@ -11,6 +11,8 @@ import type { ChatSocket } from './socket.ts';
 
 class FakeSocket {
   connected = false;
+  /** What Socket.IO reports after a reconnect: was it restored as the same connection? */
+  recovered = false;
   /** Everything the controller sent to the "server", in order. */
   readonly sent: Array<{ event: string; payload: unknown }> = [];
   /** What the "server" answers to each request. Unlisted requests get `{ ok: true }`. */
@@ -51,6 +53,23 @@ class FakeSocket {
   removeAllListeners(): this {
     this.handlers.clear();
     return this;
+  }
+
+  /** Pretends the network dropped. */
+  drop(): void {
+    this.connected = false;
+    this.receive('disconnect', 'transport close');
+  }
+
+  /** Pretends the connection is back, either restored (`recovered`) or brand new. */
+  comeBack({ recovered }: { recovered: boolean }): void {
+    this.recovered = recovered;
+    this.connect();
+  }
+
+  /** Forgets what was sent so far, so a test can look at what is sent from now on. */
+  clearSent(): void {
+    this.sent.length = 0;
   }
 
   /** Pretends the server sent an event. */
@@ -550,17 +569,151 @@ describe('ChatController', () => {
   });
 
   describe('connection problems', () => {
-    it('losing the connection ends the call and releases the camera', async () => {
+    it('the first connection sends nothing to the server', () => {
+      const { socket } = setup();
+      expect(socket.sent).toEqual([]);
+    });
+
+    it('a short drop keeps the call and the camera running', async () => {
+      const { socket, peers, state, startWithCamera, match } = setup();
+      const stream = await startWithCamera();
+      match('s1');
+      socket.clearSent();
+
+      socket.drop();
+      expect(state()).toMatchObject({ phase: 'in_session', connection: 'reconnecting' });
+      expect(peers[0]?.closed).toBe(false);
+      expect(stream.allStopped).toBe(false);
+
+      socket.comeBack({ recovered: true });
+      expect(state()).toMatchObject({
+        phase: 'in_session',
+        sessionId: 's1',
+        connection: 'connected',
+      });
+      expect(peers).toHaveLength(1);
+      expect(peers[0]?.closed).toBe(false);
+      expect(socket.sent).toEqual([]);
+    });
+
+    it('coming back as a new connection (server restarted) ends the call', async () => {
       const { controller, socket, peers, state, startWithCamera, match } = setup();
       const stream = await startWithCamera();
       match('s1');
+      socket.clearSent();
 
-      socket.receive('disconnect', 'transport close');
+      socket.drop();
+      socket.comeBack({ recovered: false });
+
+      expect(peers[0]?.closed).toBe(true);
+      expect(stream.allStopped).toBe(true);
+      expect(state()).toMatchObject({
+        phase: 'idle',
+        notice: 'connection_lost',
+        connection: 'connected',
+      });
+      expect(controller.getSnapshot().remoteStream).toBeNull();
+      expect(socket.sent).toEqual([]);
+    });
+
+    it('coming back restored, but told the call was given up, ends the call too', async () => {
+      const { socket, peers, state, startWithCamera, match } = setup();
+      const stream = await startWithCamera();
+      match('s1');
+
+      socket.drop();
+      socket.comeBack({ recovered: true });
+      socket.receive('connection:reset');
 
       expect(peers[0]?.closed).toBe(true);
       expect(stream.allStopped).toBe(true);
       expect(state()).toMatchObject({ phase: 'idle', notice: 'connection_lost' });
-      expect(controller.getSnapshot().remoteStream).toBeNull();
+    });
+
+    it('someone who was waiting joins the queue again by themselves', async () => {
+      const { socket, state, startWithCamera } = setup();
+      const stream = await startWithCamera();
+      socket.clearSent();
+
+      socket.drop();
+      socket.comeBack({ recovered: false });
+      await settle();
+
+      expect(state()).toMatchObject({ phase: 'waiting', notice: null });
+      expect(stream.allStopped).toBe(false);
+      expect(socket.sent.map((entry) => entry.event)).toEqual(['leave', 'queue:join']);
+    });
+
+    it('goes back to the landing page if the queue refuses them after reconnecting', async () => {
+      const { socket, state, startWithCamera } = setup();
+      await startWithCamera();
+      socket.replies.set('queue:join', { ok: false, code: 'closed' });
+
+      socket.drop();
+      socket.comeBack({ recovered: false });
+      await settle();
+
+      expect(state()).toMatchObject({ phase: 'idle', notice: 'closed' });
+    });
+
+    it('Next pressed while offline takes effect once the connection is back', async () => {
+      const { controller, socket, peers, state, startWithCamera, match } = setup();
+      await startWithCamera();
+      match('s1');
+
+      socket.drop();
+      socket.clearSent();
+      controller.next();
+      expect(state().phase).toBe('waiting');
+      expect(peers[0]?.closed).toBe(true);
+      expect(socket.sent).toEqual([]); // nothing can be sent while offline
+
+      // The server kept the old chat. It has to drop it and queue us.
+      socket.comeBack({ recovered: true });
+      await settle();
+      expect(socket.sent.map((entry) => entry.event)).toEqual(['leave', 'queue:join']);
+      expect(state().phase).toBe('waiting');
+    });
+
+    it('Leave pressed while offline is repeated once the connection is back', async () => {
+      const { controller, socket, state, startWithCamera, match } = setup();
+      await startWithCamera();
+      match('s1');
+
+      socket.drop();
+      controller.leave();
+      socket.clearSent();
+      socket.comeBack({ recovered: true });
+
+      expect(state().phase).toBe('idle');
+      expect(socket.sent.map((entry) => entry.event)).toEqual(['leave']);
+    });
+
+    it('a camera allowed while offline leads to joining once the connection is back', async () => {
+      const { controller, socket, mediaRequests, state } = setup();
+      controller.start();
+      socket.drop();
+      mediaRequests[0]?.grant(new FakeStream('audio', 'video'));
+      await settle();
+      expect(state().phase).toBe('waiting');
+      expect(socket.sentEvents('queue:join')).toHaveLength(0);
+
+      socket.comeBack({ recovered: false });
+      await settle();
+
+      expect(socket.sentEvents('queue:join')).toHaveLength(1);
+    });
+
+    it('messages cannot be sent while offline', async () => {
+      const { controller, socket, state, startWithCamera, match } = setup();
+      await startWithCamera();
+      match('s1');
+      socket.drop();
+
+      controller.sendMessage('hello?');
+
+      expect(state().messages).toEqual([]);
+      expect(socket.sentEvents('chat:send')).toHaveLength(0);
     });
 
     it('reconnects by itself after being disconnected by the server', () => {

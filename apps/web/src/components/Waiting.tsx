@@ -1,5 +1,6 @@
 import type { Chat } from '../hooks/useChat.ts';
 import { MediaControls } from './MediaControls.tsx';
+import { ReconnectingBanner } from './ReconnectingBanner.tsx';
 import { VideoTile } from './VideoTile.tsx';
 
 interface WaitingProps {
@@ -22,6 +23,8 @@ export function Waiting({ chat }: WaitingProps) {
           </p>
         )}
       </div>
+
+      <ReconnectingBanner state={state} />
 
       <div className="waiting-line">
         <div className="spinner" aria-hidden="true" />

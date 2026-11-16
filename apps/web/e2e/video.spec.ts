@@ -2,14 +2,18 @@ import { expect, type Page, test } from '@playwright/test';
 import {
   closeEveryone,
   expectChatting,
+  expectVideoPlaying,
   expectWaiting,
   leaveButton,
+  mediaTracks,
   messages,
   nextButton,
   openPerson,
+  recordMediaStreams,
   say,
   startButton,
   startChatBetween,
+  videoInfo,
 } from './helpers.ts';
 
 /**
@@ -18,68 +22,6 @@ import {
  */
 
 test.afterEach(async ({ browser }) => closeEveryone(browser));
-
-interface VideoInfo {
-  width: number;
-  time: number;
-  liveAudioTracks: number;
-  liveVideoTracks: number;
-}
-
-/** Facts about a <video> element, read inside the page. */
-function videoInfo(page: Page, testId: string): Promise<VideoInfo | null> {
-  return page.evaluate((id) => {
-    const video = document.querySelector<HTMLVideoElement>(`video[data-testid="${id}"]`);
-    if (!video) return null;
-    const stream = video.srcObject instanceof MediaStream ? video.srcObject : null;
-    const live = (tracks: MediaStreamTrack[]) =>
-      tracks.filter((track) => track.readyState === 'live').length;
-    return {
-      width: video.videoWidth,
-      time: video.currentTime,
-      liveAudioTracks: stream ? live(stream.getAudioTracks()) : 0,
-      liveVideoTracks: stream ? live(stream.getVideoTracks()) : 0,
-    };
-  }, testId);
-}
-
-/** Passes once the video has a picture and its clock is moving, i.e. frames are arriving. */
-async function expectVideoPlaying(page: Page, testId: string): Promise<void> {
-  await expect
-    .poll(async () => ((await videoInfo(page, testId))?.width ?? 0) > 0, { timeout: 15_000 })
-    .toBe(true);
-  const before = (await videoInfo(page, testId))?.time ?? 0;
-  await expect
-    .poll(async () => ((await videoInfo(page, testId))?.time ?? 0) > before, { timeout: 15_000 })
-    .toBe(true);
-}
-
-/**
- * Runs before the app loads: remembers every camera/microphone stream the page obtains,
- * so a test can check later that they were all switched off.
- */
-function recordMediaStreams(): void {
-  const obtained: MediaStream[] = [];
-  (window as unknown as { obtainedStreams: MediaStream[] }).obtainedStreams = obtained;
-  const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-  navigator.mediaDevices.getUserMedia = async (constraints) => {
-    const stream = await original(constraints);
-    obtained.push(stream);
-    return stream;
-  };
-}
-
-/** How many camera/microphone tracks the page still has switched on, and how many it ever got. */
-function mediaTracks(page: Page): Promise<{ obtained: number; stillLive: number }> {
-  return page.evaluate(() => {
-    const streams = (window as unknown as { obtainedStreams: MediaStream[] }).obtainedStreams;
-    const tracks = streams.flatMap((stream) => stream.getTracks());
-    return {
-      obtained: tracks.length,
-      stillLive: tracks.filter((track) => track.readyState === 'live').length,
-    };
-  });
-}
 
 test('two people see and hear each other', async ({ browser }) => {
   const alice = await openPerson(browser);
@@ -221,6 +163,24 @@ function connectionStates(page: Page): Promise<string[]> {
     ),
   );
 }
+
+test('the video sent is limited to a modest bitrate', async ({ browser }) => {
+  const sentVideoLimit = (page: Page): Promise<number | undefined> =>
+    page.evaluate(() => {
+      const [connection] = (window as unknown as { createdConnections: RTCPeerConnection[] })
+        .createdConnections;
+      const sender = connection?.getSenders().find((s) => s.track?.kind === 'video');
+      return sender?.getParameters().encodings[0]?.maxBitrate;
+    });
+  const alice = await openPerson(browser, recordConnections);
+  const bob = await openPerson(browser, recordConnections);
+
+  await startChatBetween(alice, bob);
+  await expectVideoPlaying(alice, 'remote-video');
+
+  await expect.poll(() => sentVideoLimit(alice)).toBe(600_000);
+  await expect.poll(() => sentVideoLimit(bob)).toBe(600_000);
+});
 
 test('the connection to the previous partner is closed, not left running', async ({ browser }) => {
   const alice = await openPerson(browser, recordConnections);

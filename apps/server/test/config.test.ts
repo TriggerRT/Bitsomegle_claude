@@ -10,6 +10,7 @@ describe('loadConfig', () => {
       maxClients: 1000,
       maxClientsPerIp: 0,
       clientIpHeader: null,
+      reconnectGraceMs: 10_000,
       turn: null,
       logLevel: 'info',
     });
@@ -78,6 +79,17 @@ describe('loadConfig', () => {
 
     it.each(['-1', 'many'])('rejects %s', (value) => {
       expect(() => loadConfig({ MAX_CLIENTS_PER_IP: value })).toThrow(/Invalid MAX_CLIENTS_PER_IP/);
+    });
+  });
+
+  describe('RECONNECT_GRACE_MS', () => {
+    it('can be changed or switched off', () => {
+      expect(loadConfig({ RECONNECT_GRACE_MS: '3000' }).reconnectGraceMs).toBe(3000);
+      expect(loadConfig({ RECONNECT_GRACE_MS: '0' }).reconnectGraceMs).toBe(0);
+    });
+
+    it.each(['-1', '600000', 'soon'])('rejects %s', (value) => {
+      expect(() => loadConfig({ RECONNECT_GRACE_MS: value })).toThrow(/Invalid RECONNECT_GRACE_MS/);
     });
   });
 

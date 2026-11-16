@@ -1,16 +1,18 @@
 # Bitsomeggle — Project Status
 
-_Last updated: 2026-11-14 (M5 code done, not deployed yet)_
+_Last updated: 2026-11-16 (M6 code done; not deployed, live load test and manual tests pending)_
 
 ## Phase
-**M5 (deploy a beta, add the TURN relay): the code and the deployment files are written and tested locally. The deployment itself has not happened.** It needs you to create three free accounts and follow [DEPLOYMENT.md](DEPLOYMENT.md), then do the M5 tests in [MANUAL_TESTS.md](MANUAL_TESTS.md). After that: M6, reliability (see [TODO.md](TODO.md)).
+**M5 is complete:** the beta is online at https://bitsomegle-claude.vercel.app with the relay working, and all ten M5 manual tests are confirmed.
+
+**M6 (reliability): the code is written and tested locally, but not committed, pushed or deployed.** Still open: the load test against the live server (decides whether the free plan is enough), and manual tests M6-1 to M6-6 ([MANUAL_TESTS.md](MANUAL_TESTS.md)). See [TODO.md](TODO.md).
 
 ## What exists
 | Item | Status |
 |---|---|
 | Product brief ([MASTER_PROMPT.md](MASTER_PROMPT.md)) | Done |
 | Architecture ([ARCHITECTURE.md](ARCHITECTURE.md)) | Server (§3, §4) and web app (§5) implemented |
-| Decision log ([DECISIONS.md](DECISIONS.md)) | D-001 … D-037 |
+| Decision log ([DECISIONS.md](DECISIONS.md)) | D-001 … D-041 |
 | `CLAUDE.md` (repo root) | Done |
 | Git repository | Branch `main`, pushed to private GitHub repo `TriggerRT/Bitsomegle_claude` |
 | npm workspaces: `packages/shared`, `apps/server`, `apps/web` | Implemented, tested |
@@ -29,11 +31,17 @@ _Last updated: 2026-11-14 (M5 code done, not deployed yet)_
 | `npm run dev` (server + web together) | Implemented, tested by running it |
 | Tooling: TypeScript 7, Biome, vitest 5, Vite 8 | Implemented; lint/typecheck/build/test all pass after a clean `npm ci` |
 | GitHub Actions CI (Node 22 + 24) | Implemented, tested: all three jobs green for the M4 push (confirmed by user, 2026-11-14) |
-| TURN relay credentials from Cloudflare (`apps/server/src/turn/`) | Implemented, tested with a stand-in for Cloudflare. **Needs manual test** with a real key (M5-3) |
-| Per-IP connection cap (`apps/server/src/socket/ipLimit.ts`) | Implemented, tested. Which header Render uses for the visitor's address is **unverified** until deployed (M5-4) |
+| TURN relay credentials from Cloudflare (`apps/server/src/turn/`) | Implemented, tested with a stand-in for Cloudflare. With the real key on Render: credentials fetched, and a relay-only call connected (M5-3, confirmed by user 2026-11-14) |
+| Per-IP connection cap (`apps/server/src/socket/ipLimit.ts`) | Implemented, tested. Render does send `true-client-ip` (seen in the live log, M5-4). The cap itself has not been reached on the live server |
 | Relay test switch (`?relay=1`) | Implemented, tested |
-| Deployment files: `render.yaml`, `apps/web/vercel.json`, `.github/workflows/wake-server.yml` | Implemented. Render's build and start commands were rehearsed locally in a clean copy. **Untested on the real services** |
-| Deployment guide ([DEPLOYMENT.md](DEPLOYMENT.md)) | Written from the providers' documentation; **not yet followed on real accounts** |
+| Reconnect grace: a call survives a short drop of the server connection (D-038) | Implemented, tested (server with pretend browsers; real browser windows with the connection cut on purpose). **Needs manual test** on real networks |
+| Rejoin after a server restart or long drop; "Reconnecting…" banner | Implemented, tested |
+| Rescue of a broken video call: one ICE restart (D-039) | Implemented, tested against a stand-in for the browser's call object. **Needs manual test**: never seen on a real broken call |
+| Video bitrate cap, 600 kbit/s (D-040) | Implemented, tested in Chromium |
+| Stats log line once a minute (D-041) | Implemented, tested; seen in a local run |
+| Load-test tool (`npm run loadtest`) | Implemented; run locally with 300 users. **Not yet run against the live server** |
+| Deployment files: `render.yaml`, `apps/web/vercel.json`, `.github/workflows/wake-server.yml` | Implemented. Render and Vercel both built and deployed from them (2026-11-14). The wake-up job is still inactive and **untested** |
+| Deployment guide ([DEPLOYMENT.md](DEPLOYMENT.md)) | Followed by the user on real accounts (2026-11-14). Corrected where reality differed: Cloudflare asks for a card, and Vercel needed a different install command |
 
 ## Feature status
 Status words: Implemented / Tested / Partially tested / Untested / Needs manual test / Blocked.
@@ -46,11 +54,12 @@ Status words: Implemented / Tested / Partially tested / Untested / Needs manual 
 | Video/audio (WebRTC P2P) | Tested end to end with a pretend camera (M4) and confirmed by the user with a real camera on one laptop. Between different networks: **needs manual test** after deployment |
 | Next button | Tested end to end, no page reload (M3) |
 | Waiting / matched / partner-left states | Tested end to end (M3). Closed-hours and server-full screens: logic unit-tested, **not yet seen in a browser** |
-| TURN relay | Server side implemented and tested against a stand-in. **Needs manual test** with a real Cloudflare key (M5-3) |
+| TURN relay | Working on the live site: relay-only calls connected, including from campus Wi-Fi (M5-3, M5-7, confirmed by user) |
 | Opening-hours window | Server: tested. Countdown UI: implemented, logic unit-tested, not exercised in a browser test |
 | Rate limiting | Tested (M2). Numbers to be tuned after beta |
+| Surviving connection drops | Tested with simulated drops (M6). **Needs manual test** on real networks (M6-1 to M6-3) |
 | Report & skip / moderation hooks | Not started |
-| Deployment | Files and guide ready. **Not deployed**: waiting on the user's accounts |
+| Deployment | Live since 2026-11-14. Laptop, phone ↔ laptop and two-network calls confirmed by the user (M5-2, M5-5, M5-6) |
 
 ## Test evidence (M1)
 - 57 tests pass (`npm test`), 47 of them for matchmaking.
@@ -58,6 +67,22 @@ Status words: Implemented / Tested / Partially tested / Untested / Needs manual 
 - Randomized test: 2,000 seeded sequences × 150 operations (300,000 operations). After each one it checks the invariants and that a simulated browser, updated only from effects, agrees with the server.
 - Bug-injection check: 9 deliberate bugs were added one at a time (stale guard removed, partner left in queue, half-ended session, duplicate join, ghost left in queue, two impolite peers, avoid list ignored, fallback removed, client not deleted). The tests failed for all 9. The original code was then restored.
 - Coverage of `matchmaking/`: every line of real logic runs in tests. The only lines not run are the "this should never happen" alarms.
+
+## Test evidence (M6)
+- `npm run check` passes: lint, typecheck, **407 tests**. `npm run e2e`: **25 browser tests** pass, twice in a row. `npm run build` succeeds.
+- New in M6 (60 unit and integration tests, 7 browser tests):
+  - Server, with pretend browsers whose connection is cut without a goodbye: a call is kept when they return in time; the give-up timer is cancelled; messages sent meanwhile are delivered; a partner's Next during the gap is learned on return; returning works even when the server is full; not returning ends the call for the partner after the grace period and not before; a late return is told `connection:reset` and can start again. No grace for people waiting, deliberate goodbyes, old copies of the app, or when switched off.
+  - Web app logic: a drop keeps the chat on screen; a restored connection changes nothing; a new connection or a reset ends the chat with an explanation and releases the camera; someone waiting rejoins by themselves; Next, Leave and "camera allowed" while offline take effect on reconnect.
+  - Call rescue (stand-in call object): the impolite side restarts once; the polite side never does; success, repeated failure, timeout, a 4-second interruption, and closing mid-rescue.
+  - Real browser windows with the server connection cut on purpose: a short drop does not end the call and video keeps playing; a message sent to someone briefly offline arrives; the message box is disabled meanwhile; staying offline ends the chat for both and switches the camera off; someone waiting is still matched afterwards; navigating away tells the partner within a second; the sent video is limited to 600 kbit/s.
+- Bug-injection check: 39 deliberate bugs. 37 were caught at once. Two exposed weak tests (a waiting person wrongly given a grace period; the status timer left running after shutdown); both tests were tightened and now catch them. **All 39 are caught.**
+- **One-off check** (not in the suite, it takes 80 s): a call with no messages for 80 seconds, long enough for Socket.IO's once-a-minute clean-up to run, was still resumed after a drop. This is the case the regular status message exists for (D-038).
+- **Load test, local only:** 300 pretend users for 75 s against a server on this laptop. All connected, 3,406 chat messages and 12,312 call-setup messages delivered, nothing refused, dropped or unanswered. Answer times: chat p95 2 ms, Next p95 3 ms, join p95 10 ms. The stats line showed 300 clients, 144 calls, 114 MB. **This says the tool works and the code has no obvious bottleneck. It says nothing about Render's much smaller machine.**
+- **Not verified:**
+  - anything on the live site: M6 is not deployed;
+  - the load test against Render (the number that matters);
+  - a real network drop, a real Wi-Fi-to-mobile switch, a real broken call being rescued (M6-1 to M6-3);
+  - Firefox and Safari for the reconnect and bitrate code (browser tests run in Chromium only).
 
 ## Test evidence (M5)
 - `npm run check` passes: lint, typecheck, **347 tests**. `npm run e2e`: **18 browser tests** pass.
@@ -71,7 +96,9 @@ Status words: Implemented / Tested / Partially tested / Untested / Needs manual 
 - **Rehearsal of Vercel's commands** in a clean copy (added after the first real build failed): installing from inside `apps/web` reproduced the failure; installing from the root built the site.
 - **Rehearsal of Render's commands** in a clean copy of the repository, with `NODE_ENV=production`: the build command succeeded; the server refused to start without `CORS_ORIGIN`; with it, `/health` answered, the allowed website got a CORS header and another website did not.
 - **One real request to Cloudflare** with a made-up key: Cloudflare answered 404, the server logged "Cloudflare refused" and started normally with STUN only. This shows the address is right and a refusal is handled. It does not show that real credentials work.
-- **Not verified:** everything that needs the real services. A real TURN key, Render's build, Vercel's build, the header Render uses for addresses, calls between two networks, phones, Safari, Firefox. See MANUAL_TESTS.md, M5-1 to M5-10.
+- **On the live site (2026-11-14):** `/health` answers (checked by Claude); the site sends the four security headers (checked by Claude); the Render log shows "TURN credentials refreshed", `turnRelay:true`, `perIpCap:500` and the header names `true-client-ip`, `cf-connecting-ip`, `x-forwarded-for`, with no IP addresses or chat text in the lines the user pasted. The user confirmed M5-2 (call on the deployed site), M5-3 (relay-only call), M5-5 (phone ↔ laptop) and M5-6 (two networks).
+- **2026-11-16:** the user reported that the remaining tests passed: M5-7 (relay from campus Wi-Fi), M5-8 (other browsers), M5-9 (a real second person) and M5-10 (sleep and wake). The report was "all checks passed", without per-browser details or timings.
+- **Not verified:** the per-IP cap being reached on the live server, the wake-up job, more than a handful of people online at once (M6 load test).
 
 ## Test evidence (M4)
 - 295 unit and integration tests pass (`npm test`): 62 new for the web app (37 for the controller, 25 for the state machine) and 1 for the server.
@@ -122,14 +149,13 @@ Status words: Implemented / Tested / Partially tested / Untested / Needs manual 
 - Two windows on one laptop share one microphone and speaker, so testing that way echoes unless you wear headphones.
 - Opening the dev site from another device (phone on the same Wi-Fi) is refused by the server's CORS rule until `CORS_ORIGIN` in `apps/server/.env` includes that address. Covered in the M4 manual-test checklist.
 - The web bundle is about 108 KB compressed, partly because the validation library (zod) is bundled although the browser doesn't use it yet. To trim in M7.
-- The "online" number is sent once when a browser connects and does not update live (M7).
+- The landing page doesn't show the "online" number yet, although the server now sends it every 15 s (M7).
+- When someone vanishes for good (laptop lid closed, tab killed), their partner now sees a frozen picture for up to 10 s longer than before (D-038). Leaving the page normally is still immediate.
+- Chat and call-setup messages stay in the server's memory for up to about 90 s so they can be replayed after a reconnect. They are never written to disk or logged.
 - With only two people online, skipping each other re-pairs them immediately (D-020, by design for now).
 - ⚠️ **Leaked secret in old code:** `reference/omegle_2077…/web/.env.local` contains a real ZegoCloud server secret (it was also exposed to browsers through a `NEXT_PUBLIC_` variable). **Action for the user:** rotate it or delete that ZegoCloud project. Since M0, `.gitignore` excludes `reference/**/.env*` and the zip; a `git add` dry run confirmed no env file, zip or `node_modules` would be staged.
-- Render free tier: 0.1 CPU. Unknown whether it handles ~300 concurrent sockets smoothly → measured in M6.
-- Campus Wi-Fi may block UDP → relies on TURN over TLS on port 443. Confirmed only by manual test M5-7.
-- **Cloudflare asks for a card** to create a TURN key ($0 due, 1,000 GB a month included, no spending cap). The user is deciding; the site can be deployed without the relay meanwhile (D-037).
-- First Vercel build failed ("tsc: command not found"). Fixed in `apps/web/vercel.json` and rehearsed locally; **not yet confirmed on Vercel** (D-037).
-- Unknown until tried: whether Render asks for a card, and which header Render uses for visitor addresses (D-034).
+- Render free tier: 0.1 CPU. Unknown whether it handles ~300 concurrent sockets smoothly. The tool to measure it exists; the live run is still to do (M6-6).
+- **The Cloudflare relay is live and has no spending cap** (1,000 GB a month included, then $0.05 per GB, D-037). Check that the $1 budget alert exists (DEPLOYMENT part 1, step 4). Video is now capped at 600 kbit/s; the automatic cut-off is deferred (D-040).
 
 ## Environment variables
 ### Server (set in the host's dashboard in production; see `apps/server/.env.example`)
@@ -139,6 +165,7 @@ Status words: Implemented / Tested / Partially tested / Untested / Needs manual 
 | `CORS_ORIGIN` | Implemented | Web app address(es) allowed to connect, comma separated. **Required when `NODE_ENV=production`**. Default `http://localhost:5173` |
 | `OPEN_WINDOWS` | Implemented | Daily opening windows in IST, e.g. `21:00-00:30`. Empty = always open |
 | `MAX_CLIENTS` | Implemented | Cap on simultaneous connections. Default 1000 |
+| `RECONNECT_GRACE_MS` | Implemented | How long a call is kept for someone whose connection dropped. Default 10000. 0 = off |
 | `MAX_CLIENTS_PER_IP` | Implemented | Cap on connections from one address. Default 0 (off). 500 in `render.yaml` |
 | `CLIENT_IP_HEADER` | Implemented | Header in which the hosting proxy reports the visitor's address. Empty = no proxy. `true-client-ip` in `render.yaml` |
 | `TURN_KEY_ID` | Implemented | Cloudflare TURN key id. Empty = STUN only |
@@ -162,11 +189,17 @@ npm install
 npm run dev          # server on :3001 and web app on http://localhost:5173
 npm run check        # lint + typecheck + unit and integration tests
 npm run e2e          # browser tests (first time only: npx playwright install chromium)
+npm run loadtest     # 300 pretend users against a local server (start one with npm run dev:server)
 ```
 To try it: run `npm run dev`, open http://localhost:5173 in two browser windows, press **Start chatting** in both.
 Node ≥ 22.12 required. Node 24 LTS recommended (production target).
 
 ## Deployment
-**Not deployed yet.** Server → Render free (Singapore), described in `render.yaml`. Web → Vercel Hobby, settings in `apps/web/vercel.json`. Relay → Cloudflare TURN. Step-by-step guide: [DEPLOYMENT.md](DEPLOYMENT.md).
+**Live since 2026-11-14.**
+| Piece | Address |
+|---|---|
+| Web app (Vercel Hobby, settings in `apps/web/vercel.json`) | https://bitsomegle-claude.vercel.app |
+| Server (Render free, Singapore, described in `render.yaml`) | https://bitsomeggle.onrender.com (health check: `/health`) |
+| Relay | Cloudflare TURN, key held in Render's environment |
 
-Once deployed, record here: the web address, the server address, and the date.
+Opening hours are not set, so the site is always open. Step-by-step guide: [DEPLOYMENT.md](DEPLOYMENT.md).

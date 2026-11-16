@@ -257,4 +257,39 @@ _(Node version detail refined in D-018: ≥22.12 locally, 24 LTS in production.)
 - **Lesson:** the Render commands had been rehearsed in a clean copy before the first attempt, Vercel's had not. Both are rehearsed now.
 - **Cloudflare asks for a card** before a TURN key can be created, although the order shows $0 due and 1,000 GB a month included. This answers the open item in D-002 and D-033. There is no spending cap; budget alerts only send an email.
 - **Consequence:** the TURN key is now optional for the first deployment (the server already runs with STUN only). Whether to give Cloudflare a card is the user's decision; the trade-offs are in DEPLOYMENT.md part 1.
-- **Fallback if the user declines:** Metered's Open Relay (20 GB a month free, about 40 relayed call-hours). Enough for testing, too small for daily use. It would need a second credential source next to `cloudflareTurn.ts`.
+- **Outcome (2026-11-14):** the user created the Cloudflare key. On the live server the log showed "TURN credentials refreshed" and a relay-only call connected (M5-3). Render's proxy does send `true-client-ip`, as D-034 assumed.
+- **Fallback had the user declined:** Metered's Open Relay (20 GB a month free, about 40 relayed call-hours). Enough for testing, too small for daily use. It would need a second credential source next to `cloudflareTurn.ts`.
+
+## D-038 — Reconnect grace: Socket.IO recovery, our own timer, and a regular status message (M6)
+*Accepted · 2026-11-16*
+- **Decision:** When someone in a call loses their connection without saying goodbye, the server waits 10 s (`RECONNECT_GRACE_MS`) before ending the call. Coming back as the same client uses Socket.IO's built-in connection state recovery.
+- **Found by reading Socket.IO's code:** it can restore a connection only if it still remembers the last message that browser received, and it forgets messages after the recovery window (checked once a minute). A video call can be silent for many minutes, so recovery would have failed in exactly the case we care about. **Fix:** send every browser a small `status` message every 15 s. That also makes the "online" number live, which was an open item. Checked with a one-off run: a call with 80 quiet seconds was resumed.
+- **Our own timer decides, not Socket.IO's window.** The window (grace + 15 s + 5 s margin) only has to be long enough. A browser restored after our timer has fired is told `connection:reset`.
+- **Tried and rejected: disconnecting such a browser to force a clean reconnect.** Socket.IO keeps the old session restorable, so the browser was restored again on every attempt, in a loop, until the window ran out.
+- **Only people in a call get a grace period.** A waiting person kept "half present" could be matched while absent. Their browser simply rejoins the queue when it is back.
+- **Tab close and navigation send `leave` first,** so the partner isn't left looking at a frozen picture for 10 s. A tab that is killed outright still costs the partner the 10 s.
+- **Protocol number.** Vercel and Render deploy at different moments, and people keep old tabs open. A browser announces `protocol: 2` when it understands kept calls; only those get a grace period. An old tab ends its call on any drop, and the server does the same for it, so the two sides can't disagree.
+- **After every reconnect the browser states what it wants** (`leave`, then `queue:join` if it is waiting). That covers buttons pressed while offline, and a server that restarted.
+- **Cost:** when someone vanishes for good (laptop lid closed), the partner now learns up to 10 s later than before. Messages are held in server memory for up to about 90 s for replay (never on disk, never logged).
+- **Alternative rejected:** our own resume tokens with our own message buffer. More code to get wrong, for the same result.
+
+## D-039 — A broken call gets one rescue attempt (M6)
+*Accepted · 2026-11-16 · completes the "M6" note in D-032*
+- **Decision:** On `failed`, or after 4 s of `disconnected`, the impolite side calls `restartIce()`; both sides show "Connecting video…". If the call isn't connected within 15 s, or fails again, the user is told it failed. A call that recovers gets a fresh attempt next time.
+- **Why only the impolite side:** same reason as D-029. If both sent a restart offer at once, the polite side would have to abandon its own, which is the situation in which Chromium stalls.
+- **Why 4 s:** browsers take about 30 s to declare a call failed. Short hiccups heal in a second or two; after 4 s it is worth looking for another route (typical case: phone moved from Wi-Fi to mobile data).
+- **Works together with D-038:** the restart offer travels through the server. If that connection dropped too, the offer waits in the browser and is sent on reconnect; the server kept the call for 10 s.
+- **Tested** with a stand-in for the browser's call object, because a real call can't be made to fail on demand. **Needs manual test** on real networks (M6-1, M6-2).
+
+## D-040 — Relay cost: bitrate cap now, automatic cut-off deferred (M6)
+*Accepted · 2026-11-16 · follows D-037*
+- **Done:** video is capped at 600 kbit/s per direction (`MAX_VIDEO_BITRATE`). A relayed call now costs a known amount: about 0.27 GB per hour per direction, so at most about 0.55 GB per call-hour. 1,000 free GB is then at least 1,800 relayed call-hours a month.
+- **Deferred: stopping TURN automatically near 1,000 GB.** It needs a second Cloudflare secret (a read-only analytics token and the account id) and a usage query I can't test without real data. Usage today is a few GB. Until then the protections are the $1 budget alert and deleting the TURN key by hand.
+- **Revisit when:** the Cloudflare dashboard shows more than about 200 GB in a month, or before announcing the site to the whole campus.
+
+## D-041 — Load-test tool and a once-a-minute stats line (M6)
+*Accepted · 2026-11-16*
+- **Tool:** `npm run loadtest` connects pretend users who join, exchange call-setup messages of realistic size, chat and press Next, and reports how long the server takes to answer. No video is sent: video never passes through our server.
+- **Stats line:** while anyone is connected the server logs, once a minute, people online, waiting, calls, event-loop delay and memory. It answers "how busy was it tonight?" and "was the server keeping up?" from Render's log. Counts only.
+- **Local result (laptop, not Render):** 300 users for 75 s: every request answered, chat p95 2 ms, nothing refused or dropped.
+- **Not done yet:** the run against the live Render server, which is what decides D-009 (free plan or paid). It needs the M6 code deployed first, and a quiet moment, because real visitors online would be matched with pretend users.

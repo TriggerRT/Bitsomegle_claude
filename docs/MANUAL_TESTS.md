@@ -115,19 +115,21 @@ and Next in one row. Nothing overlaps or is cut off.
 
 ## M5 — The deployed site
 
-Do these after following [DEPLOYMENT.md](DEPLOYMENT.md). Below, **web address** means your
-Vercel address and **server address** means your Render address.
+Do these after following [DEPLOYMENT.md](DEPLOYMENT.md). Below:
+- **web address** = the Vercel one, https://bitsomegle-claude.vercel.app
+- **server address** = the Render one, https://bitsomeggle.onrender.com
 
 **M5-1 to M5-4 need only your laptop** and take about five minutes. Do them straight after
 deploying. The rest need a phone, a second network and a friend.
 
-### M5-1 The server is alive — _Needs manual test_
-1. Open `<server address>/health` in a browser tab.
+### M5-1 The server is alive — _Confirmed (2026-11-14, checked by Claude)_
+1. Open https://bitsomeggle.onrender.com/health in a browser tab. Use the **server** address: the web address
+   has no such page and shows Vercel's "This page doesn't exist" instead.
 
 You should see: `{"status":"ok","app":"Bitsomeggle"}`. If the server was asleep this can
 take up to a minute the first time.
 
-### M5-2 The site connects and a call works — _Needs manual test_
+### M5-2 The site connects and a call works — _Confirmed (2026-11-14)_
 1. Open the web address in a normal window and in an incognito window. Wear headphones.
 2. Wait for **Start chatting** to become clickable in both, then press it in both.
 3. Send a text message each way.
@@ -135,7 +137,7 @@ take up to a minute the first time.
 You should see: video both ways and both messages delivered, as on your laptop in M4.
 Report: how long the Start button took to become clickable.
 
-### M5-3 The relay works — _Needs manual test_
+### M5-3 The relay works — _Confirmed (2026-11-14)_
 This is the most important M5 test. It proves the Cloudflare TURN key is working.
 1. Press Leave in both windows.
 2. In the incognito window, change the address to `<web address>/?relay=1` and press Enter.
@@ -145,7 +147,7 @@ You should see: video both ways, perhaps a second or two slower to appear than i
 If instead the window says "Couldn't connect video", the relay is **not** working: tell
 Claude, and include what M5-4 shows.
 
-### M5-4 The server log looks right — _Needs manual test_
+### M5-4 The server log looks right — _Confirmed (2026-11-14)_
 1. In Render, open the `bitsomeggle` service and its **Logs** tab.
 2. Find the lines listed under "You should see" and copy them to Claude (they contain no
    personal data).
@@ -159,7 +161,7 @@ You should see:
 You should **not** see: `visitor address not found`, any IP address, or any of the chat
 text you typed in M5-2.
 
-### M5-5 Phone ↔ laptop on the same Wi-Fi — _Needs manual test_
+### M5-5 Phone ↔ laptop on the same Wi-Fi — _Confirmed (2026-11-14)_
 1. Laptop: open the web address, press Start. Use headphones on the laptop.
 2. Phone (on the same Wi-Fi): open the web address in Chrome (Android) or Safari
    (iPhone), allow camera and microphone, press Start.
@@ -168,13 +170,13 @@ You should see: video and sound both ways. On the phone, the video is on top and
 chat underneath; Mute, Camera, Leave and Next are all reachable with a thumb.
 Report: phone model and browser, and anything that looks cut off or too small.
 
-### M5-6 Two different networks — _Needs manual test_
+### M5-6 Two different networks — _Confirmed (2026-11-14)_
 1. Laptop on campus Wi-Fi (or home Wi-Fi). Phone with **Wi-Fi switched off**, on mobile data.
 2. Start on both.
 
 You should see: video and sound both ways within about 10 seconds.
 
-### M5-7 Campus Wi-Fi through the relay — _Needs manual test_
+### M5-7 Campus Wi-Fi through the relay — _Confirmed (2026-11-16)_
 Checks that the campus firewall lets relayed calls through.
 1. Both devices on **campus Wi-Fi**.
 2. On one of them open `<web address>/?relay=1`. Start on both.
@@ -182,7 +184,7 @@ Checks that the campus firewall lets relayed calls through.
 You should see: video and sound both ways. If this fails but M5-3 worked from elsewhere,
 the campus network is blocking the relay: tell Claude, it changes what we do next.
 
-### M5-8 Other browsers — _Needs manual test_
+### M5-8 Other browsers — _Confirmed (2026-11-16)_
 Repeat M5-2 with one side in each of these, as far as you have them:
 - Firefox on the laptop
 - Safari on an iPhone
@@ -192,7 +194,7 @@ Repeat M5-2 with one side in each of these, as far as you have them:
 Report per browser: ✅, or what went wrong. Known thing to watch on iPhone: sound may
 only start after you touch the page once.
 
-### M5-9 A real second person — _Needs manual test_
+### M5-9 A real second person — _Confirmed (2026-11-16)_
 1. Ask a friend in another room or another hostel to open the web address. Both press Start.
 2. Talk for two minutes. Try Mute, Camera off, a few text messages, and Next (you will be
    matched with each other again, because nobody else is online).
@@ -201,10 +203,78 @@ Report: can you both hear clearly? Is there an echo of your own voice (which sid
 it)? How long is the delay between speaking and being heard, roughly? Is the picture
 smooth or does it freeze?
 
-### M5-10 Sleep and wake — _Needs manual test_
+### M5-10 Sleep and wake — _Confirmed (2026-11-16)_
 1. Close every Bitsomeggle tab and leave the site alone for at least 20 minutes.
 2. Open the web address.
 
 You should see: "Connecting… If the server was asleep, this can take up to a minute.",
 then the Start button becomes clickable by itself, without reloading the page.
 Report: roughly how long it took.
+
+---
+
+## M6 — Reliability on real networks
+
+Do these on the live site **after M6 has been pushed and Render shows the new version as
+Live**. Use two devices where it says so; a phone and a laptop are ideal.
+
+Automated tests cut the connection in a simulated way. Only these tests show what real
+Wi-Fi and mobile networks do.
+
+### M6-1 A short Wi-Fi blip — _Needs manual test_
+1. Start a call between a laptop and a phone.
+2. On the laptop, switch Wi-Fi **off**, count to three, switch it **on** again.
+
+You should see, on the laptop: an orange "Connection lost. Reconnecting…" banner, and the
+picture freezing or showing "Connecting video…". Within about 15 seconds of Wi-Fi being
+back, the banner disappears and video and sound return **in the same chat**: your earlier
+text messages are still there.
+On the phone: the picture freezes and then recovers. It must **not** say "Stranger
+disconnected."
+Report: roughly how many seconds until video was back, and what each screen showed.
+
+### M6-2 Phone switches from Wi-Fi to mobile data — _Needs manual test_
+1. Start a call with the phone on Wi-Fi (mobile data also enabled).
+2. On the phone, switch Wi-Fi off, so it falls back to mobile data.
+
+You should see: as M6-1. The call continues over mobile data in the same chat.
+Report: seconds until video was back; phone model and browser.
+
+### M6-3 A long drop — _Needs manual test_
+1. Start a call between two devices.
+2. On one of them switch Wi-Fi off and leave it off for **30 seconds**. Then switch it on.
+
+You should see, on the other device: after about 10 to 30 seconds, "Stranger disconnected.
+Press Next to meet someone new."
+On the device that was offline: once it is back online, the start page with "Your
+connection dropped, so the chat ended.", and the camera light off.
+
+### M6-4 Closing the tab — _Needs manual test_
+1. Start a call between two devices (or two windows).
+2. Close the tab on one of them.
+
+You should see, on the other: "Stranger left." within about two seconds.
+(If it takes about 10 seconds and says "Stranger disconnected." instead, tell Claude which
+browser closed the tab: that browser didn't get its goodbye out.)
+
+### M6-5 The server restarts — _Needs manual test_
+1. Open three windows. Start a call between two; press Start in the third so it shows
+   "Looking for someone…" (it stays waiting, because the other two are busy).
+2. In Render, open the `bitsomeggle` service and choose **Manual Deploy → Restart service**.
+
+You should see: all three show "Connection lost. Reconnecting…" for up to a minute or two.
+Then the two that were in a call show the start page with "Your connection dropped, so the
+chat ended.", and the third goes back to "Looking for someone…" **by itself**, without
+you pressing anything.
+
+### M6-6 Load test on the live server — _Needs manual test (Claude can run it; you choose when)_
+This decides whether Render's free plan is enough. It connects 300 pretend users for two
+minutes. **Real visitors online at that moment would be matched with them**, so pick a
+time when nobody is expected.
+1. Tell Claude when to run it, or run it yourself from the project folder:
+   `npm run loadtest -- --url https://bitsomeggle.onrender.com --clients 300 --seconds 120`
+2. Afterwards, in Render's **Logs**, find the lines ending in `"msg":"stats"`.
+
+You should see: "users connected 300 of 300", no refused or unanswered requests, and
+answer times under about 300 ms at p95. In the log, `loopDelayP99Ms` under about 100.
+Report: the two tables the tool prints, and the stats lines from the log.

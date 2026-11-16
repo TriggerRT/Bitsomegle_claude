@@ -4,7 +4,7 @@ Anonymous 1:1 video chat with random matching and a Next button, for BITS Pilani
 The full product brief is in [docs/MASTER_PROMPT.md](docs/MASTER_PROMPT.md); read it before making architectural changes.
 
 ## Current phase
-M0 to M4 are done: tooling, matchmaking core, realtime server, web app with text chat, and peer-to-peer video and audio. **M5 (deploy a beta, add TURN) is half done:** the TURN credential code, per-IP cap and deployment files are written and tested locally, but nothing is deployed. The user still has to create the accounts and follow `docs/DEPLOYMENT.md`, then do manual tests M5-1 to M5-10 (`docs/MANUAL_TESTS.md`). After that: M6, reliability. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/TODO.md](docs/TODO.md).
+M0 to M4 are done: tooling, matchmaking core, realtime server, web app with text chat, and peer-to-peer video and audio. **M5 is done:** the beta is live (web https://bitsomegle-claude.vercel.app, server https://bitsomeggle.onrender.com) with the Cloudflare TURN relay working. **M6 (reliability) is written and tested locally but not deployed:** reconnect grace, rejoin after a server restart, one ICE restart for a broken call, a video bitrate cap, a stats log line and a load-test tool. Still open: push and deploy, the load test against the live server (M6-6), and manual tests M6-1 to M6-5 (`docs/MANUAL_TESTS.md`). After that: M7, safety and polish. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/TODO.md](docs/TODO.md).
 
 ## Stack (decided — see docs/DECISIONS.md for reasons)
 - **Web:** Vite + React + TypeScript SPA → Vercel (free).
@@ -41,6 +41,7 @@ Node ≥ 22.12 required (CI also tests Node 24, the production target).
 | `npm run lint` / `npm run format` | Biome check / auto-fix (Markdown and `reference/` are excluded) |
 | `npm run build` | Build shared → server → web (in that order) into each `dist/` |
 | `npm run check` | lint + typecheck + test (run before saying something is done) |
+| `npm run loadtest -- --url <server> --clients 300 --seconds 60` | Pretend users against a server (default: local, port 3001). Never aim it at the live site without the user choosing the time: real visitors would be matched with pretend users |
 | `npm start -w @bitsomeggle/server` | Run the compiled server (after `npm run build`) |
 
 ## How the packages connect (important, easy to get wrong)
@@ -55,11 +56,16 @@ Node ≥ 22.12 required (CI also tests Node 24, the production target).
 - After changing `matchmaking/` or `socket/`, break the code on purpose once and confirm a test fails.
 - `IceServerSource.getIceServers()` (`turn/`) is called while a match is delivered, so it must stay synchronous: anything slow happens in the background refresh. Tests replace Cloudflare with the `fetch` override of `createApp`; no test may contact the real service.
 - Extra request headers for a test client (for example a proxy's address header): `server.connect({ 'true-client-ip': '1.2.3.4' })`.
+- **Reconnect grace is switched off in `startTestServer()` by default**, so in every other test a disconnect means "gone". Tests of it pass `{ reconnectGraceMs }` and use `client.dropConnection()` (a drop without goodbye) versus `client.close()` (a deliberate goodbye). `server.connect({}, { reconnects: true })` makes a client that comes back by itself.
+- The grace timer lives in `socket/socketServer.ts`, not in the Matchmaker: while it runs, matchmaking simply hasn't been told. Its callback calls the Matchmaker synchronously like any handler. Only clients in a call get a grace period (D-038).
+- Socket.IO can restore a connection only if it remembers the last message that browser received. The 15-second `status` broadcast guarantees that; don't remove it or make it conditional (D-038).
 
 ## Deployment
 - Server → Render (`render.yaml`), web → Vercel (root directory `apps/web`), relay → Cloudflare TURN. The user's step-by-step guide is `docs/DEPLOYMENT.md`; keep it correct when anything here changes.
-- Pushing to `main` deploys: Vercel at once, Render after CI passes. A server deploy disconnects everyone online.
-- A new server env var needs four places: `config.ts` (+ test), `apps/server/.env.example`, `render.yaml`, and the table in `docs/PROJECT_STATUS.md`.
+- **The site is live.** Pushing to `main` deploys: Vercel at once, Render after CI passes. A server deploy disconnects everyone online.
+- Vercel must install from the repository root (`installCommand` in `apps/web/vercel.json`); installing inside `apps/web` misses the root-level tools (D-037).
+- A new server env var needs: `config.ts` (+ test), `apps/server/.env.example`, the table in `docs/PROJECT_STATUS.md`, and `render.yaml` if production needs a value other than the default.
+- Vercel and Render deploy at different moments and people keep old tabs open, so a change to what browser and server say to each other must work with the previous version on the other side. `RESUME_PROTOCOL` (`packages/shared`) is how the browser tells the server what it understands.
 - Opening `…/?relay=1` forces that browser to use the TURN relay only (for testing the relay).
 
 ## Working on the web app
@@ -67,6 +73,9 @@ Node ≥ 22.12 required (CI also tests Node 24, the production target).
 - **WebRTC:** the impolite side makes the first offer and the polite side waits (DECISIONS D-029). Do not make both sides offer at call start: Chromium stalls after the resulting rollback. One `RTCPeerConnection` per session, never reused.
 - The camera must be off whenever the user is on the landing page. Any new way of getting there must be covered by a test that checks the tracks are stopped.
 - Browser tests use Chromium's pretend camera (`playwright.config.ts`). To simulate a blocked or missing camera, replace `getUserMedia` through `openPerson(browser, beforeLoad)`.
+- **A dropped connection does not end a chat.** `connection_lost` only sets `connection: 'reconnecting'`. The chat ends through `session_lost`, which the controller dispatches when the connection comes back as a new one or the server sends `connection:reset`. After every (re)connect, `resyncWithServer()` makes the server match the screen (D-038).
+- **A broken call:** only the impolite side calls `restartIce()`, once per breakdown (D-039). The polite side must never start it, for the same reason as the first offer.
+- Call behaviour that can't be produced on demand in a browser (a call failing) is unit-tested in `services/peer.test.ts` with a stand-in `RTCPeerConnection`. To cut a page's server connection in a browser test, see `openPersonWithNetwork` in `e2e/reconnect.spec.ts`.
 - Server events can arrive late. The reducer must ignore `waiting`/`matched` unless the user is waiting or in a chat, and ignore `session_ended`/messages for any session but the current one.
 - If the server refuses Start or Next, go idle AND send `leave` (DECISIONS D-026).
 - Unit tests: `src/**/*.test.ts` (vitest). Browser tests: `e2e/*.spec.ts` (Playwright); find elements by role and visible text, as a user would.

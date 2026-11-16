@@ -58,7 +58,7 @@ Milestones in order. Each one ends **tested** and with the docs updated. Details
 - [x] Pushed (2026-11-14)
 - [x] CI green for the M4 push (confirmed by user, 2026-11-14)
 
-## M5 — Deploy beta + TURN · code ✅ (2026-11-14) · deployment waiting on you
+## M5 — Deploy beta + TURN ✅ (deployed 2026-11-14, manual tests confirmed 2026-11-16)
 - [x] `turn/cloudflareTurn.ts`: credentials fetched in the background, refreshed hourly, read from memory at match time (D-033)
 - [x] Per-IP connection cap with a configurable address header (D-034)
 - [x] `?relay=1` switch to test the relay (D-036)
@@ -67,20 +67,25 @@ Milestones in order. Each one ends **tested** and with the docs updated. Details
 - [x] Guide written: [DEPLOYMENT.md](DEPLOYMENT.md); manual tests M5-1 to M5-10 written
 - [x] Commit and push M5; CI green (confirmed by user, 2026-11-14)
 - [x] Fix the Vercel build: install from the repository root (D-037)
-- [ ] Push the fix; **you:** redeploy on Vercel and report
-- [ ] **You decide:** give Cloudflare a card for the TURN key, or deploy without the relay for now (DEPLOYMENT part 1, D-037)
-- [ ] **You:** deploy web to Vercel and server to Render (parts 2 to 4)
-- [ ] **Needs manual test:** M5-1 to M5-4 right after deploying (server alive, site connects, relay works, log check)
-- [ ] **Needs manual test:** M5-5 to M5-10 (phone ↔ laptop, two networks, campus Wi-Fi through the relay, Safari/Firefox/Android, a real second person, sleep and wake)
-- [ ] Record the two addresses in PROJECT_STATUS.md; correct DEPLOYMENT.md wherever the real pages differed
+- [x] Fix pushed; Vercel build succeeded (2026-11-14)
+- [x] Cloudflare TURN key created by the user; web on Vercel, server on Render
+- [x] M5-1 to M5-6 confirmed (server alive, call on the live site, relay works, log check, phone ↔ laptop, two networks)
+- [x] Addresses recorded in PROJECT_STATUS.md
+- [ ] **You:** check the $1 Cloudflare budget alert exists (DEPLOYMENT part 1, step 4)
+- [x] M5-7 to M5-10 confirmed by user (2026-11-16): campus Wi-Fi through the relay, other browsers, a real second person, sleep and wake
 - [ ] Later: choose opening hours; set `OPEN_WINDOWS`, the wake-up time and `SERVER_URL` (DEPLOYMENT part 6)
 
-## M6 — Reliability hardening
-- [ ] Before a public launch, if the Cloudflare relay is used: cap the video bitrate, and stop handing out TURN credentials automatically when the month's usage nears 1,000 GB (Cloudflare has no spending cap of its own, D-037)
-- [ ] ICE restart once when a call fails or stays disconnected (today the user is told and can press Next)
-- [ ] Reconnect grace via Socket.IO connection-state recovery
-- [ ] Server-restart behavior ("Connection lost, tap to rejoin")
-- [ ] Load test: ~300 simulated clients against the deployed free instance → decide whether a paid plan is needed (D-009)
+## M6 — Reliability hardening · code ✅ (2026-11-16) · live load test and manual tests pending
+- [x] Reconnect grace: a call survives a short drop of the server connection (D-038)
+- [x] Server-restart behaviour: waiting people rejoin by themselves; a lost call is explained on the start page
+- [x] One ICE restart when a call fails or stays interrupted (D-039)
+- [x] Video bitrate capped at 600 kbit/s (D-040)
+- [x] "Online" number sent every 15 s (shown on the page in M7)
+- [x] Stats line in the server log once a minute; load-test tool `npm run loadtest`, run locally with 300 users (D-041)
+- [ ] Commit and push M6; CI green; Render and Vercel redeploy
+- [ ] **Load test against the live server** at a quiet time (M6-6) → decide whether the free plan is enough (D-009)
+- [ ] **Needs manual test:** M6-1 to M6-5 (Wi-Fi blip, Wi-Fi to mobile data, long drop, tab close, server restart)
+- [ ] Deferred: stop handing out TURN credentials automatically near 1,000 GB a month. Needs a read-only Cloudflare analytics token. Do it when monthly relay use passes about 200 GB or before a campus-wide announcement (D-040)
 
 ## M7 — Safety + UX polish
 - [ ] Report & skip, avoid list, temporary cooldown after multiple distinct reports

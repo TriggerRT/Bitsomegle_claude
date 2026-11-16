@@ -23,7 +23,8 @@
     "check": "npm run lint && npm run typecheck && npm test",
     "test:coverage": "vitest run --coverage",
     "dev": "concurrently -n server,web -c blue,green \"npm run dev:server\" \"npm run dev:web\"",
-    "e2e": "npm run e2e -w @bitsomeggle/web"
+    "e2e": "npm run e2e -w @bitsomeggle/web",
+    "loadtest": "npm run loadtest -w @bitsomeggle/server --"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.7",

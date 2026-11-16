@@ -393,3 +393,23 @@ input:focus-visible {
     font-size: 0.9rem;
   }
 }
+
+/* "Connection lost. Reconnecting…" on the waiting and call screens. */
+.banner {
+  margin: 0;
+  padding: 0.5rem 0.9rem;
+  border-radius: 999px;
+  background: #b45309;
+  color: #fff;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.remote .banner {
+  position: absolute;
+  top: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  white-space: nowrap;
+}

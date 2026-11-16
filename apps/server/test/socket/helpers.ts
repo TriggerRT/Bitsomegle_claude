@@ -4,11 +4,12 @@
  * client library the web app will use.
  */
 import type { AddressInfo } from 'node:net';
-import type {
-  AckResult,
-  MatchedPayload,
-  SessionEndedPayload,
-  StatusPayload,
+import {
+  type AckResult,
+  type MatchedPayload,
+  RESUME_PROTOCOL,
+  type SessionEndedPayload,
+  type StatusPayload,
 } from '@bitsomeggle/shared';
 import { io, type Socket } from 'socket.io-client';
 import { type App, type AppOverrides, createApp } from '../../src/app.ts';
@@ -29,6 +30,13 @@ export const GENEROUS_RATE_LIMITS: RateLimits = {
   strike: DEFAULT_RATE_LIMITS.strike,
 };
 
+export interface TestClientOptions {
+  /** Reconnect automatically after the connection drops, like the real web app. */
+  reconnects?: boolean;
+  /** What the browser announces about itself. `null` imitates an old copy of the app. */
+  protocol?: number | null;
+}
+
 interface ReceivedEvent {
   event: string;
   payload: unknown;
@@ -43,11 +51,17 @@ export class TestClient {
   private readonly waiters = new Map<string, Array<(payload: unknown) => void>>();
 
   /** `headers` are extra request headers, as a hosting proxy would add them. */
-  constructor(url: string, headers: Record<string, string> = {}) {
+  constructor(url: string, headers: Record<string, string> = {}, options: TestClientOptions = {}) {
+    const protocol = options.protocol === undefined ? RESUME_PROTOCOL : options.protocol;
     this.socket = io(url, {
       transports: ['websocket'],
       forceNew: true,
-      reconnection: false,
+      reconnection: options.reconnects ?? false,
+      // Retry almost immediately, so tests don't wait.
+      reconnectionDelay: 10,
+      reconnectionDelayMax: 10,
+      randomizationFactor: 0,
+      auth: protocol === null ? {} : { protocol },
       extraHeaders: headers,
     });
     this.socket.onAny((event: string, payload: unknown) => {
@@ -81,6 +95,22 @@ export class TestClient {
         resolve(reason);
       });
     });
+  }
+
+  /**
+   * Cuts the connection the way a network problem would: without saying goodbye.
+   * A client created with `reconnects` comes back by itself a moment later, unless
+   * `stayAway` is set; then call `comeBack()` when the test wants it to return.
+   */
+  dropConnection({ stayAway = false } = {}): void {
+    if (stayAway) this.socket.io.reconnection(false);
+    this.socket.io.engine.close();
+  }
+
+  /** Reconnects after `dropConnection({ stayAway: true })` or after being disconnected. */
+  comeBack(): Promise<void> {
+    this.socket.connect();
+    return this.waitUntilConnected();
   }
 
   /** The next not-yet-read event with this name. Waits for it if it has not arrived. */
@@ -160,9 +190,12 @@ export interface TestServer {
   app: App;
   url: string;
   /** Connects a new pretend browser and waits for its first `status` event. */
-  connect: (headers?: Record<string, string>) => Promise<TestClient & { status: StatusPayload }>;
+  connect: (
+    headers?: Record<string, string>,
+    options?: TestClientOptions,
+  ) => Promise<TestClient & { status: StatusPayload }>;
   /** Connects without waiting, for tests where the connection is expected to fail. */
-  connectRaw: (headers?: Record<string, string>) => TestClient;
+  connectRaw: (headers?: Record<string, string>, options?: TestClientOptions) => TestClient;
   stop: () => Promise<void>;
 }
 
@@ -178,6 +211,8 @@ export async function startTestServer(
       maxClients: 1000,
       maxClientsPerIp: 0,
       clientIpHeader: null,
+      // Off unless a test asks for it, so "disconnect" means "gone" everywhere else.
+      reconnectGraceMs: 0,
       turn: null,
       logLevel: 'silent',
       ...config,
@@ -191,8 +226,11 @@ export async function startTestServer(
   const url = `http://127.0.0.1:${port}`;
   const clients: TestClient[] = [];
 
-  const connectRaw = (headers?: Record<string, string>): TestClient => {
-    const client = new TestClient(url, headers);
+  const connectRaw = (
+    headers?: Record<string, string>,
+    options?: TestClientOptions,
+  ): TestClient => {
+    const client = new TestClient(url, headers, options);
     clients.push(client);
     return client;
   };
@@ -201,8 +239,8 @@ export async function startTestServer(
     app,
     url,
     connectRaw,
-    connect: async (headers) => {
-      const client = connectRaw(headers);
+    connect: async (headers, options) => {
+      const client = connectRaw(headers, options);
       await client.waitUntilConnected();
       const status = await client.next<StatusPayload>('status');
       return Object.assign(client, { status });

@@ -45,6 +45,9 @@ export default defineConfig({
         CORS_ORIGIN: WEB_URL,
         OPEN_WINDOWS: '',
         LOG_LEVEL: 'warn',
+        // How long a call is kept for someone whose connection dropped. 10 s in
+        // production; short here so tests of "did not come back" are quick.
+        RECONNECT_GRACE_MS: '1500',
       },
     },
     {

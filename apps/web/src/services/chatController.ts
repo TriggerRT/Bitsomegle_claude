@@ -99,7 +99,17 @@ export class ChatController {
   connect(): void {
     const { socket } = this.deps;
 
-    socket.on('connect', () => this.dispatch({ type: 'connected' }));
+    socket.on('connect', () => {
+      // `recovered` means the server restored us as the same connection after a short
+      // drop, so a chat in progress is still there. Otherwise this is a brand-new
+      // connection (first visit, a long drop, or the server restarted).
+      const recovered = socket.recovered === true;
+      this.dispatch({ type: 'connected' });
+      if (!recovered) this.dispatch({ type: 'session_lost' });
+      this.resyncWithServer(recovered);
+    });
+    // The server restored the connection but had already given up our place.
+    socket.on('connection:reset', () => this.dispatch({ type: 'session_lost' }));
     socket.on('disconnect', (reason) => {
       this.dispatch({ type: 'connection_lost' });
       // After being disconnected BY the server, Socket.IO does not retry on its own.
@@ -303,6 +313,25 @@ export class ChatController {
     this.mediaAttempt += 1; // abandons a permission prompt that is still open
     if (this.localStream) this.deps.stopMedia(this.localStream);
     this.localStream = null;
+  }
+
+  /**
+   * Called each time the connection is (re)established. While we were offline the user
+   * may have pressed Next, Cancel or Leave, and the server may have forgotten us, so the
+   * two sides can disagree. This makes the server match what the screen shows:
+   * - still looking for someone -> "drop whatever you have for me, then queue me";
+   * - in a chat that the server kept -> nothing to do;
+   * - anything else -> "drop whatever you have for me" (only needed if it kept a chat).
+   */
+  private resyncWithServer(recovered: boolean): void {
+    const { socket } = this.deps;
+    const { phase } = this.state;
+    if (phase === 'waiting') {
+      socket.emit('leave', noReplyNeeded);
+      this.requestMatch((s) => s.timeout(REQUEST_TIMEOUT_MS).emitWithAck('queue:join'));
+    } else if (recovered && phase !== 'in_session') {
+      socket.emit('leave', noReplyNeeded);
+    }
   }
 
   /**

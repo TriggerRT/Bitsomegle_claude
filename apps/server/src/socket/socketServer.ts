@@ -6,6 +6,7 @@ import {
   type IceServer,
   mediaStateSchema,
   nextSchema,
+  RESUME_PROTOCOL,
   type ServerToClientEvents,
   type StatusPayload,
   signalSchema,
@@ -30,6 +31,9 @@ type ClientSocket = Socket<DefaultEventsMap, ServerToClientEvents>;
 /** Largest single message accepted from a browser. Bigger ones close that connection. */
 export const MAX_MESSAGE_BYTES = 32 * 1024;
 
+/** Safety margin added to how long Socket.IO remembers a dropped connection. */
+const RECOVERY_MARGIN_MS = 5_000;
+
 /**
  * How often the server checks each connection is alive, and how long it waits for the
  * reply. A browser that vanishes without saying goodbye (laptop lid closed, Wi-Fi lost)
@@ -37,6 +41,12 @@ export const MAX_MESSAGE_BYTES = 32 * 1024;
  */
 const PING_INTERVAL_MS = 10_000;
 const PING_TIMEOUT_MS = 10_000;
+
+/** How often every browser is sent the current status (opening hours, number online). */
+export const STATUS_INTERVAL_MS = 15_000;
+
+/** Ways of losing a connection that the browser may come back from by itself. */
+const RECOVERABLE_DISCONNECTS = new Set(['transport close', 'transport error', 'ping timeout']);
 
 export interface SocketServerOptions {
   matchmaker: Matchmaker;
@@ -51,6 +61,13 @@ export interface SocketServerOptions {
   /** Header in which the hosting proxy reports the visitor's IP. null: no proxy. */
   clientIpHeader: string | null;
   rateLimits: RateLimits;
+  /**
+   * How long a call is kept for someone whose connection dropped, in case they come
+   * straight back. 0 switches this off: a drop then ends the call immediately.
+   */
+  reconnectGraceMs: number;
+  /** How often the status is sent to everyone. Tests shorten it. */
+  statusIntervalMs: number;
   /** STUN/TURN servers handed to both browsers when they are matched. */
   getIceServers: () => IceServer[];
   logger: Logger;
@@ -77,6 +94,18 @@ export function attachSocketServer(
     maxHttpBufferSize: MAX_MESSAGE_BYTES,
     pingInterval: PING_INTERVAL_MS,
     pingTimeout: PING_TIMEOUT_MS,
+    // Lets a browser whose connection dropped come back as the SAME client, and receive
+    // whatever was sent to it in the meantime. See "Reconnect grace" further down.
+    ...(options.reconnectGraceMs > 0 && {
+      connectionStateRecovery: {
+        // Socket.IO can only restore a connection if it still remembers the last message
+        // that browser received. The regular status message below guarantees one at most
+        // `statusIntervalMs` ago, so remembering for this long is always enough.
+        maxDisconnectionDuration:
+          options.reconnectGraceMs + options.statusIntervalMs + RECOVERY_MARGIN_MS,
+        skipMiddlewares: true,
+      },
+    }),
   });
 
   const currentStatus = (): StatusPayload => ({
@@ -112,6 +141,31 @@ export function attachSocketServer(
     perIpCap > 0 ? clientIpOf(socket.handshake, options.clientIpHeader) : null;
   let firstConnectionSeen = false;
   let warnedAboutMissingIp = false;
+
+  // ---- Reconnect grace -----------------------------------------------------------------
+  // A phone moving between Wi-Fi access points loses its connection for a second or two.
+  // Ending the call for that would be harsh, especially as the video itself goes directly
+  // between the two browsers and often survives. So when someone IN A CALL drops, we wait
+  // `reconnectGraceMs` before telling the matchmaker. If they are back in time, nothing
+  // happened as far as matchmaking is concerned.
+  //
+  // Only people in a call get this. Someone who was waiting is removed at once, so nobody
+  // is ever matched with a person who is not there.
+  const graceTimers = new Map<string, NodeJS.Timeout>();
+
+  // The regular status message. It keeps the "online" number current on every landing
+  // page, and it is what makes reconnecting reliable (see connectionStateRecovery above).
+  const statusTimer = setInterval(
+    () => io.emit('status', currentStatus()),
+    options.statusIntervalMs,
+  );
+  statusTimer.unref();
+
+  httpServer.on('close', () => {
+    clearInterval(statusTimer);
+    for (const timer of graceTimers.values()) clearTimeout(timer);
+    graceTimers.clear();
+  });
 
   // Runs before a connection is accepted.
   io.use((socket, next) => {
@@ -152,17 +206,45 @@ export function attachSocketServer(
       );
     }
 
-    matchmaker.connect(clientId);
-    logger.debug({ client: clientId }, 'client connected');
+    socket.on('disconnect', (reason) => {
+      if (ip !== null) connectionsPerIp.remove(ip);
+      logger.debug({ client: clientId, reason }, 'client disconnected');
+
+      const mayComeBack =
+        options.reconnectGraceMs > 0 &&
+        socket.handshake.auth.protocol === RESUME_PROTOCOL &&
+        RECOVERABLE_DISCONNECTS.has(reason) &&
+        matchmaker.getClient(clientId)?.state === 'in_session';
+      if (!mayComeBack) {
+        deliver(matchmaker.disconnect(clientId));
+        return;
+      }
+      const timer = setTimeout(() => {
+        graceTimers.delete(clientId);
+        deliver(matchmaker.disconnect(clientId));
+        logger.debug({ client: clientId }, 'client did not come back in time');
+      }, options.reconnectGraceMs);
+      timer.unref();
+      graceTimers.set(clientId, timer);
+    });
+
+    const waitingForThem = graceTimers.get(clientId);
+    if (waitingForThem !== undefined) {
+      // Back within the grace period (Socket.IO restored the connection under its old
+      // id). Matchmaking never heard about the drop, so there is nothing else to do.
+      clearTimeout(waitingForThem);
+      graceTimers.delete(clientId);
+      logger.debug({ client: clientId }, 'client came back in time');
+    } else {
+      matchmaker.connect(clientId);
+      logger.debug({ client: clientId }, 'client connected');
+      // Socket.IO can also restore a connection we had already given up on (or never
+      // waited for). That browser believes nothing changed, so tell it otherwise.
+      if (socket.recovered) socket.emit('connection:reset');
+    }
     socket.emit('status', currentStatus());
 
     registerHandlers(socket, limiter);
-
-    socket.on('disconnect', (reason) => {
-      if (ip !== null) connectionsPerIp.remove(ip);
-      deliver(matchmaker.disconnect(clientId));
-      logger.debug({ client: clientId, reason }, 'client disconnected');
-    });
   });
 
   function registerHandlers(socket: ClientSocket, limiter: RateLimiter): void {

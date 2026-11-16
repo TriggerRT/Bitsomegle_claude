@@ -47,26 +47,76 @@ describe('chatReducer', () => {
       expect(play(startPressed).phase).toBe('idle');
     });
 
-    it('losing the connection during a chat ends it and says why', () => {
-      const state = play(connected, ...begin, matched('s1'), sent('hi'), {
-        type: 'connection_lost',
-      });
-      expect(state).toMatchObject({
-        connection: 'reconnecting',
-        phase: 'idle',
-        sessionId: null,
-        messages: [],
-        notice: 'connection_lost',
-      });
-    });
+    describe('a dropped connection', () => {
+      const lost: ChatEvent = { type: 'connection_lost' };
+      const sessionLost: ChatEvent = { type: 'session_lost' };
 
-    it('losing the connection on the landing page shows no notice', () => {
-      expect(play(connected, { type: 'connection_lost' }).notice).toBeNull();
-    });
+      it('does not end a chat by itself: the chat stays on screen while reconnecting', () => {
+        const state = play(connected, ...begin, matched('s1'), sent('hi'), lost);
+        expect(state).toMatchObject({
+          connection: 'reconnecting',
+          phase: 'in_session',
+          sessionId: 's1',
+          notice: null,
+        });
+        expect(state.messages).toHaveLength(1);
+      });
 
-    it('reconnecting returns to a usable landing page', () => {
-      const state = play(connected, ...begin, { type: 'connection_lost' }, connected, ...begin);
-      expect(state).toMatchObject({ connection: 'connected', phase: 'waiting', notice: null });
+      it('coming back with the chat still there changes nothing but the connection', () => {
+        const before = play(connected, ...begin, matched('s1'), sent('hi'));
+        expect(chatReducer(chatReducer(before, lost), connected)).toEqual(before);
+      });
+
+      it('coming back to find the chat gone ends it and says why', () => {
+        const state = play(
+          connected,
+          ...begin,
+          matched('s1'),
+          sent('hi'),
+          lost,
+          connected,
+          sessionLost,
+        );
+        expect(state).toMatchObject({
+          connection: 'connected',
+          phase: 'idle',
+          sessionId: null,
+          messages: [],
+          notice: 'connection_lost',
+        });
+      });
+
+      it('events for the chat are still applied while reconnecting', () => {
+        const state = play(connected, ...begin, matched('s1'), lost, {
+          type: 'session_ended',
+          sessionId: 's1',
+          reason: 'partner_next',
+        });
+        expect(state).toMatchObject({ phase: 'partner_left', endReason: 'partner_next' });
+      });
+
+      it.each([
+        ['on the landing page', []],
+        ['while the camera prompt is open', [startPressed]],
+        ['while waiting', begin],
+        [
+          'after the partner already left',
+          [
+            ...begin,
+            matched('s1'),
+            { type: 'session_ended', sessionId: 's1', reason: 'partner_left' },
+          ],
+        ],
+      ] as Array<[string, ChatEvent[]]>)('%s, a lost session changes nothing', (_name, events) => {
+        const before = play(connected, ...events);
+        const after = [lost, connected, sessionLost].reduce(chatReducer, before);
+        expect(after).toEqual(before);
+      });
+
+      it('blocks Start until the connection is back', () => {
+        expect(play(connected, lost, startPressed).phase).toBe('idle');
+        expect(play(connected, lost, connected, startPressed).phase).toBe('requesting_media');
+      });
     });
 
     it('a full server is reported and leaves the user idle', () => {

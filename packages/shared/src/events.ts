@@ -152,4 +152,10 @@ export interface ServerToClientEvents {
   'media:state': (payload: MediaStatePayload) => void;
   /** Sent when a request without an ack callback is refused. */
   'server:error': (payload: { code: ErrorCode }) => void;
+  /**
+   * Sent right after a reconnect if the server did NOT keep this browser's place: it is
+   * now a fresh visitor, in no queue and no chat. (A browser whose chat was kept gets
+   * nothing; that is the normal case after a short drop.)
+   */
+  'connection:reset': () => void;
 }

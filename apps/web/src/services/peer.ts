@@ -1,6 +1,20 @@
 import type { IceServer, SignalPayload } from '@bitsomeggle/shared';
 import type { CallState } from '../state/chatMachine.ts';
 
+/**
+ * How long the call may stay interrupted before we try to find a new route.
+ * Short interruptions usually heal by themselves within a second or two.
+ */
+export const INTERRUPTION_PATIENCE_MS = 4_000;
+/** How long one attempt to find a new route may take before the call counts as failed. */
+export const RECOVERY_DEADLINE_MS = 15_000;
+/**
+ * The most video we send, in bits per second. Plenty for a 640x480 picture. It keeps
+ * calls usable on weak connections and keeps relayed calls cheap: at this rate one hour
+ * of video is about 0.27 GB in each direction.
+ */
+export const MAX_VIDEO_BITRATE = 600_000;
+
 /** Removes a field from every member of a union type. */
 type Without<T, K extends string> = T extends unknown ? Omit<T, K> : never;
 
@@ -76,6 +90,13 @@ export function toSignal(payload: SignalPayload): Signal {
  * Why rule 1 exists (found by testing, docs/DECISIONS.md D-029): when the polite side has
  * to abandon its own offer, Chromium stops gathering network routes for that connection
  * and the call never connects. Deciding who offers first avoids ever getting there.
+ *
+ * 3. WHEN THE CALL BREAKS (a phone switches from Wi-Fi to mobile data, say), the route
+ *    between the two browsers is gone but the call itself can be saved by finding a new
+ *    route. That is called an "ICE restart". We try it ONCE per breakdown, and for the
+ *    same reason as rule 1 only the IMPOLITE side starts it; the polite side waits for
+ *    the resulting offer. If the call is not back within RECOVERY_DEADLINE_MS, or breaks
+ *    again straight away, the user is told the call failed and can press Next.
  */
 export function createPeerLink(options: PeerOptions): PeerLink {
   const { polite, sendSignal, onRemoteStream, onCallState, onError } = options;
@@ -85,6 +106,16 @@ export function createPeerLink(options: PeerOptions): PeerLink {
   });
 
   let closed = false;
+  /** True from the moment a broken call is being rescued until it is connected again. */
+  let recovering = false;
+  let patienceTimer: ReturnType<typeof setTimeout> | null = null;
+  let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearTimers = (): void => {
+    if (patienceTimer !== null) clearTimeout(patienceTimer);
+    if (deadlineTimer !== null) clearTimeout(deadlineTimer);
+    patienceTimer = null;
+    deadlineTimer = null;
+  };
   /** True if we (the impolite side) decided to ignore the partner's colliding offer. */
   let ignoringOffer = false;
 
@@ -136,13 +167,63 @@ export function createPeerLink(options: PeerOptions): PeerLink {
     if (stream && !closed) onRemoteStream(stream);
   };
 
+  const giveUp = (): void => {
+    clearTimers();
+    // `recovering` stays true, so a further failure does not start yet another attempt.
+    onCallState('failed');
+  };
+
+  /** Rule 3: one attempt to save a broken call. */
+  const startRecovery = (): void => {
+    if (recovering) {
+      giveUp(); // it broke again during (or after) the one attempt
+      return;
+    }
+    recovering = true;
+    clearTimers();
+    onCallState('connecting');
+    // Asks the browser to look for new routes. That makes it fire `onnegotiationneeded`,
+    // which sends a fresh offer to the partner.
+    if (!polite) connection.restartIce();
+    deadlineTimer = setTimeout(giveUp, RECOVERY_DEADLINE_MS);
+  };
+
+  /** Applies MAX_VIDEO_BITRATE to the video we send. */
+  const limitVideoBitrate = (): void => {
+    for (const sender of connection.getSenders()) {
+      if (sender.track?.kind !== 'video') continue;
+      const parameters = sender.getParameters();
+      const encoding = parameters.encodings?.[0];
+      if (!encoding || encoding.maxBitrate === MAX_VIDEO_BITRATE) continue;
+      encoding.maxBitrate = MAX_VIDEO_BITRATE;
+      // Not being able to set a limit is no reason to disturb the call.
+      sender.setParameters(parameters).catch(onError);
+    }
+  };
+
   connection.onconnectionstatechange = () => {
     if (closed) return;
     const state = connection.connectionState;
-    if (state === 'connected') onCallState('connected');
-    else if (state === 'failed') onCallState('failed');
-    // 'disconnected' is usually a short network hiccup that recovers by itself.
-    else if (state === 'connecting' || state === 'disconnected') onCallState('connecting');
+    if (state === 'connected') {
+      clearTimers();
+      recovering = false;
+      onCallState('connected');
+      limitVideoBitrate();
+    } else if (state === 'failed') {
+      startRecovery();
+    } else if (state === 'disconnected') {
+      // Usually a short hiccup that heals by itself. If it lasts, try to rescue the call
+      // without waiting for the browser to declare it failed (which takes much longer).
+      onCallState('connecting');
+      if (!recovering && patienceTimer === null) {
+        patienceTimer = setTimeout(() => {
+          patienceTimer = null;
+          if (!closed && connection.connectionState === 'disconnected') startRecovery();
+        }, INTERRUPTION_PATIENCE_MS);
+      }
+    } else if (state === 'connecting') {
+      onCallState('connecting');
+    }
   };
 
   // Offer our microphone and camera to the partner. This triggers `onnegotiationneeded`.
@@ -182,6 +263,7 @@ export function createPeerLink(options: PeerOptions): PeerLink {
   const close = (): void => {
     if (closed) return;
     closed = true;
+    clearTimers();
     connection.onnegotiationneeded = null;
     connection.onicecandidate = null;
     connection.ontrack = null;

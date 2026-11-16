@@ -45,7 +45,13 @@ export function useChat(serverUrl: string): Chat {
     const unsubscribe = controller.subscribe(() => setSnapshot(controller.getSnapshot()));
     controller.connect();
 
+    // Closing the tab or navigating away is a Leave. Saying so explicitly lets the server
+    // tell the partner at once, instead of waiting to see whether we come back.
+    const onPageHide = (): void => controller.leave();
+    window.addEventListener('pagehide', onPageHide);
+
     return () => {
+      window.removeEventListener('pagehide', onPageHide);
       unsubscribe();
       controller.destroy();
       controllerRef.current = null;

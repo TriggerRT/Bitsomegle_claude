@@ -1,5 +1,6 @@
 import { createApp } from './app.ts';
 import { loadConfig } from './config.ts';
+import { startStatsLog } from './ops/statsLog.ts';
 
 const config = loadConfig();
 const app = createApp(config);
@@ -22,14 +23,21 @@ app.httpServer.listen(config.port, () => {
       alwaysOpen: config.openWindows.length === 0,
       turnRelay: config.turn !== null,
       perIpCap: config.maxClientsPerIp,
+      reconnectGraceMs: config.reconnectGraceMs,
     },
     'Bitsomeggle server listening',
   );
 });
 
+const stopStatsLog = startStatsLog({
+  getCounts: () => app.matchmaker.stats(),
+  logger: app.logger,
+});
+
 // On Ctrl+C locally, or when the host stops the service, close cleanly.
 function shutdown(signal: string): void {
   app.logger.info({ signal }, 'shutting down');
+  stopStatsLog();
   app.close().then(
     () => process.exit(0),
     (error: unknown) => {

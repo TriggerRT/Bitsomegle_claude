@@ -119,6 +119,22 @@ test('closing the tab ends the chat for the partner', async ({ browser }) => {
   await expectWaiting(bob);
 });
 
+test('navigating away tells the partner at once, without waiting to see if we come back', async ({
+  browser,
+}) => {
+  const alice = await openPerson(browser);
+  const bob = await openPerson(browser);
+  await startButton(alice).click();
+  await startButton(bob).click();
+  await expectChatting(bob);
+
+  // Unlike a tab that simply vanishes (previous test), a page that is left says goodbye.
+  await alice.goto('about:blank');
+
+  // Well inside the 1.5 s the test server would otherwise wait for Alice to return.
+  await expect(bob.getByText('Stranger left.')).toBeVisible({ timeout: 1000 });
+});
+
 test('pressing Next rapidly never breaks the pairing', async ({ browser }) => {
   const alice = await openPerson(browser);
   const bob = await openPerson(browser);

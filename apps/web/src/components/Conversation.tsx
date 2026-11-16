@@ -3,6 +3,7 @@ import type { Chat } from '../hooks/useChat.ts';
 import type { ChatState } from '../state/chatMachine.ts';
 import { ChatPanel } from './ChatPanel.tsx';
 import { MediaControls } from './MediaControls.tsx';
+import { ReconnectingBanner } from './ReconnectingBanner.tsx';
 import { VideoTile } from './VideoTile.tsx';
 
 const END_TEXT: Record<SessionEndReason, string> = {
@@ -53,6 +54,7 @@ export function Conversation({ chat }: ConversationProps) {
             </p>
           )}
           {active && !state.partnerMedia.audio && <p className="badge">Stranger is muted</p>}
+          <ReconnectingBanner state={state} />
 
           <div className="self-view">
             <VideoTile stream={chat.localStream} isSelf label="Your video" testId="local-video" />
@@ -80,7 +82,11 @@ export function Conversation({ chat }: ConversationProps) {
         </div>
       </section>
 
-      <ChatPanel messages={state.messages} canSend={active} onSend={chat.sendMessage} />
+      <ChatPanel
+        messages={state.messages}
+        canSend={active && state.connection === 'connected'}
+        onSend={chat.sendMessage}
+      />
     </main>
   );
 }

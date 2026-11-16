@@ -98,6 +98,8 @@ The server gives the two browsers opposite roles when it creates the session, on
 1. **The impolite side always makes the first offer. The polite side waits for it** and sends its camera and microphone in the answer. So a collision can't happen when a call starts.
 2. **Later collisions** are handled by the standard "perfect negotiation" pattern from the WebRTC spec authors: the polite side drops its own offer and accepts the other one, and the impolite side ignores the incoming offer. Nothing in the app renegotiates today (the mic and camera buttons only pause tracks), so this is a safety net for future features.
 
+3. **When a call breaks** (a phone switches from Wi-Fi to mobile data, say), the route between the two browsers is gone, but the call can be saved by finding a new route. That is an **ICE restart**. We try it once per breakdown, and for the same reason as rule 1 only the impolite side starts it (§5.3, D-039).
+
 Rule 1 exists because of something found while testing M4 (DECISIONS D-029): when the polite side has to abandon its own offer, Chromium stops gathering network routes for that connection and the call never connects. Avoiding the collision avoids the problem.
 
 ### 2.5 Session IDs as version numbers (stale events)
@@ -124,6 +126,7 @@ With session IDs: the server drops any event whose `sessionId` isn't the sender'
 | `turn/cloudflareTurn.ts` | Fetches short-lived TURN credentials from Cloudflare in the background and keeps the latest in memory (§3.8) | — |
 | `moderation/ModerationSink.ts` | Interface for reports and abuse events. v1 writes structured logs (no content); later could write to a DB | — |
 | `schedule/openHours.ts` | "Is the site open now? When does it open or close?" (IST windows from config) | — |
+| `ops/statsLog.ts` | One log line a minute while anyone is connected: people online, waiting, calls, how well the server is keeping up (event-loop delay) and memory. Counts only | — |
 | `config.ts` | Reads and validates env vars at startup; crashes early if something is missing | — |
 
 Returning effects instead of emitting means the matchmaking logic can be tested with plain function calls. No real sockets are needed.
@@ -168,14 +171,21 @@ Only the **partner** receives `session_ended`. The client who pressed Next or Le
 ### 3.5 Disconnects, heartbeats, restarts
 - **Clean disconnects** (tab closed, Leave) are seen immediately. The partner gets `session:ended{reason:'partner_disconnected'}`.
 - **Heartbeats:** the server pings every 10 s and waits up to 10 s for the reply (Socket.IO's defaults are 25 s and 20 s). A browser that vanishes without saying goodbye (laptop lid closed, Wi-Fi lost) is removed within about 20 s.
-- **Reconnect grace** _(M6)_: Socket.IO "connection state recovery" lets a client that drops for under ~10 s come back with the same id. The video keeps flowing during a signaling blip, because media is peer-to-peer. Until M6, a disconnect ends the session immediately.
-- **Server restart / deploy:** all in-memory state is lost and all sockets drop. Clients show "Connection lost, tap to rejoin". This is acceptable because nothing needs to survive, and live calls would be lost anyway.
+- **Reconnect grace** _(M6, `socket/socketServer.ts`)_. A phone moving between Wi-Fi access points loses its connection to the server for a second or two. Ending the call for that would be harsh, especially as the video goes directly between the browsers and often survives.
+  - When someone **in a call** drops without saying goodbye, the server waits `RECONNECT_GRACE_MS` (10 s) before telling the matchmaker. If they are back in time, matchmaking never hears about it and the partner notices nothing. Messages sent to them meanwhile are delivered when they return.
+  - If they are not back in time, the partner gets `session:ended{reason:'partner_disconnected'}`, exactly as before, only 10 s later.
+  - **Only people in a call get this.** Someone waiting is removed at once, so nobody is matched with a person who isn't there. Their browser rejoins the queue by itself when it reconnects (§5.2).
+  - **A deliberate goodbye gets no grace:** Leave, closing the tab or navigating away (the web app sends `leave` when the page is left).
+  - **How the same client comes back:** Socket.IO's "connection state recovery" restores a dropped connection under its old id and replays what it missed. It can only do so if it still remembers the last message that browser received, and it forgets messages after a while. So the server sends everyone a small `status` message every 15 s (which also keeps the "online" number current). That guarantees a recent message always exists (D-038).
+  - **A browser that comes back too late** may still be restored by Socket.IO, after the server has given up its place. It would believe nothing changed, so the server sends it `connection:reset`.
+  - Older copies of the web app (a tab left open across an update) don't know about any of this. Browsers that do announce `protocol: 2` when connecting, and only they get a grace period.
+- **Server restart / deploy:** all in-memory state is lost and every connection drops. Browsers reconnect by themselves, as brand-new connections. Someone who was waiting rejoins the queue automatically. Someone who was in a call lands on the start page with "Your connection dropped, so the chat ended." Nothing needs to survive a restart, and calls in progress can't be handed to the new server anyway.
 
 ### 3.6 Opening hours
 _Implemented in M2: `apps/server/src/schedule/openHours.ts`._
 - Config: `OPEN_WINDOWS`, a comma-separated list of daily windows in IST on a 24-hour clock, e.g. `21:00-00:30`. A window may run past midnight. Empty means always open (the default for local development).
 - IST is always UTC+5:30, so the calculation is plain arithmetic and doesn't depend on the server machine's time zone.
-- On connect, each browser gets a `status` event: `{open, opensAt, closesAt, online}`. The landing page uses it for "opens in 2 h 10 min" and can flip itself to "closed" at `closesAt` without asking again.
+- On connect, and then every 15 seconds, each browser gets a `status` event: `{open, opensAt, closesAt, online}`. The landing page uses it for "opens in 2 h 10 min" and can flip itself to "closed" at `closesAt` without asking again.
 - **While closed:** `queue:join` is refused with code `closed`. `session:next` ends the current call (the user asked for that) but finds nobody new, and also replies `closed`.
 - **Calls in progress at closing time simply continue.** There are no timers and no forced endings (DECISIONS D-022).
 - A scheduled GitHub Actions job (`.github/workflows/wake-server.yml`) calls `/health` about 15 minutes before opening to wake the free Render instance. It does nothing until the repository variable `SERVER_URL` is set (DEPLOYMENT.md, part 6).
@@ -243,7 +253,7 @@ Client-to-server payloads are **zod schemas**, checked on the server for every m
 ### Server → Client
 | Event | Payload |
 |---|---|
-| `status` | `{open, opensAt, closesAt, online}` (sent on connect) |
+| `status` | `{open, opensAt, closesAt, online}` (sent on connect and every 15 s) |
 | `queue:waiting` | none |
 | `session:matched` | `{sessionId, polite, iceServers}`. `iceServers` is the STUN/TURN list for the call (STUN, plus a TURN relay when the server has a Cloudflare key, §3.8) |
 | `session:ended` | `{sessionId, reason: 'partner_next' \| 'partner_left' \| 'partner_disconnected'}` |
@@ -251,6 +261,9 @@ Client-to-server payloads are **zod schemas**, checked on the server for every m
 | `signal` | same as the client's payload |
 | `media:state` | `{sessionId, audio, video}` |
 | `server:error` | `{code}`: a request **without** an ack was refused |
+| `connection:reset` | none. Sent right after a reconnect when the server did **not** keep this browser's place (§3.5). The browser is now a fresh visitor |
+
+**When connecting**, the web app announces `auth: {protocol: 2}`: "I understand that a call can be kept across a short drop". The number lives in `packages/shared` as `RESUME_PROTOCOL`.
 
 **Rules:**
 - No partner identity or socket id is ever sent. `sessionId` is an opaque random UUID; knowing it gives no power, because membership is checked against server state.
@@ -306,7 +319,11 @@ Back to idle from any state: Leave, Cancel, Back, server refused, connection los
 - **If the server says no** (closed, too fast, or no reply within 8 s), the app returns to the landing page with a notice **and sends `leave`**, so the server also forgets us. The two sides can't disagree about whether we're in a chat.
 - **Late server events are filtered.** `waiting` and `matched` are applied only while the user is waiting or in a chat. `session:ended` and incoming messages are applied only if they name the current session. Example: you press Cancel a split second after the server matched you. The `matched` event arrives while you're on the landing page and is ignored; your `leave` then ends that session on the server.
 - **While the user wants a chat, the server's latest word wins.** If it reports a newer session than the one on screen, the screen follows.
-- **Connection lost:** any chat is over (a new connection is a fresh start on the server), and the landing page says why. Socket.IO reconnects by itself.
+- **Connection lost (M6):** nothing changes except a "Connection lost. Reconnecting…" banner and a disabled message box. The call stays on screen, and the video usually keeps playing because it doesn't go through the server. What happens next is decided when the connection is back:
+  - restored as the same connection (`socket.recovered`) → carry on as if nothing happened;
+  - a brand-new connection, or the server sends `connection:reset` → a chat in progress is over: landing page with "Your connection dropped, so the chat ended.";
+  - someone who was **waiting** stays on the waiting screen and the controller rejoins the queue for them.
+- **After every (re)connect the controller makes the server match the screen.** While offline the user may have pressed Next, Cancel or Leave. If the screen says "waiting", it sends `leave` then `queue:join`; if the connection was restored and the screen shows anything but a chat, it sends `leave`.
 - **partner_left** keeps the old messages readable but the message box is disabled. Messages are cleared on Next, Leave or a new match.
 - **Opening hours:** the landing page works out open/closed from the last `status` and a 1-second clock, so it flips at the right moment without asking the server. The server still refuses a Start while closed.
 - **Camera first (M4):** Start goes to `requesting_media`. Allowed → `waiting`. Refused or failed → `media_error` with a reason, where "Try again" asks again and "Back" returns to `idle`. Cancelling while the browser prompt is open wins over a late "Allow": the camera is switched straight off.
@@ -319,11 +336,12 @@ _Implemented in M4._
 - **Problems are explained.** Browser errors are mapped to five reasons (`denied`, `no_device`, `in_use`, `insecure`, `unknown`), each with its own instructions.
 - **No camera is fine; no microphone is not.** If the device has no camera, the app retries with the microphone alone and the user joins with audio only. The partner sees "Stranger's camera is off."
 - **Tracks are kept across Next.** No second prompt and no camera flicker. Only the `RTCPeerConnection` is replaced.
-- **Leave, Cancel, a refused request or a lost connection** → every track is stopped (the camera light goes off) and the call is closed.
+- **Leave, Cancel, a refused request or a chat lost while offline** → every track is stopped (the camera light goes off) and the call is closed. Leaving the page counts as Leave.
 - **Mic and camera buttons** set `track.enabled`. A paused camera sends black frames and can resume instantly; the devices stay reserved until Leave. `media:state` tells the partner, who sees "Stranger's camera is off." or "Stranger is muted".
 - **Picture size** is requested as 640×480 to keep calls smooth on weak Wi-Fi and TURN data use low.
 - **Call states:** "Connecting video…" until connected. If no path is found the screen says so, **the chat stays open** and text still works; the user can press Next. A media failure never changes matchmaking state.
-- _M6 adds:_ one automatic ICE restart before giving up.
+- **Rescuing a broken call (M6):** when the browser reports the call as failed, or it has been interrupted for 4 seconds, the impolite side asks for new routes (an ICE restart) and both sides show "Connecting video…". If the call isn't back within 15 seconds, or breaks again straight away, the screen says it couldn't connect, as before. One attempt per breakdown; a call that was rescued gets a fresh attempt the next time.
+- **Video bitrate (M6):** the video we send is limited to 600 kbit/s. That is plenty for 640×480, helps on weak connections, and makes the cost of a relayed call predictable: about 0.27 GB per hour in each direction.
 
 ### 5.4 Layout
 - **Desktop:** partner's video large on the left with your own mirrored picture in its corner; text chat in a side panel on the right; Mute, Camera, Leave and Next under the video.
@@ -343,6 +361,7 @@ _Implemented in M4._
 | Secrets | Server env vars only, typed into Render's dashboard and never stored in git. Browser gets only short-lived TURN credentials. No `VITE_`-prefixed secrets |
 | Embedding the site in another page | The web host sends `X-Frame-Options: DENY` and a `Permissions-Policy` that allows camera and microphone for our own page only (`apps/web/vercel.json`) |
 | Logging | Event types + random ids only. **Never** chat text, SDP, ICE candidates or IPs |
+| Messages in memory | Chat text and call-setup messages are never written to disk or a log. Since M6 they are held in the server's memory for up to about 90 seconds, so that someone who reconnects after a short drop receives what they missed; then they are discarded |
 | Cross-site use | CORS allow-list = the frontend origin only |
 | Reports _(M7)_ | "Report & skip": ends session, adds partner to the reporter's avoid list for the window, emits a `ModerationSink` event. Several distinct reporters → temporary cooldown for that socket |
 | Honest limit | With no identity, a determined abuser can reconnect. Moderation can only slow people down |
