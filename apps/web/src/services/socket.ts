@@ -23,7 +23,14 @@ export const REQUEST_TIMEOUT_MS = 8000;
  * (`socket.recovered` is then true) and delivers what was missed.
  */
 export function createChatSocket(serverUrl: string): ChatSocket {
-  return io(serverUrl, { autoConnect: false, auth: { protocol: RESUME_PROTOCOL } });
+  return io(serverUrl, {
+    autoConnect: false,
+    auth: { protocol: RESUME_PROTOCOL },
+    // Retry quickly after a drop: the server keeps a call for only a few seconds, and
+    // Socket.IO's default of waiting up to 5 s between attempts would waste most of them.
+    reconnectionDelay: 500,
+    reconnectionDelayMax: 2000,
+  });
 }
 
 /**

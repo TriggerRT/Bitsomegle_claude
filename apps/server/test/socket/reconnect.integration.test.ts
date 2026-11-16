@@ -120,6 +120,86 @@ describe('reconnect grace', () => {
     });
   });
 
+  describe('when the server has not noticed the drop (the usual case on real networks)', () => {
+    it('someone in a call who reconnects keeps the call', async () => {
+      await start();
+      const a = await server.connect({}, { reconnects: true });
+      const b = await server.connect();
+      const sessionId = await pair(a, b);
+      const idBefore = a.id;
+
+      a.dropConnection({ unnoticed: true });
+      // The server still believes both are connected.
+      expect(server.app.io.of('/').sockets.size).toBe(2);
+      await a.waitUntilConnected();
+
+      expect(a.socket.recovered).toBe(true);
+      expect(a.id).toBe(idBefore);
+      expect(server.app.io.of('/').sockets.size).toBe(2); // the dead one was replaced
+      // ...and thrown away, not left open until the next health check.
+      await expect.poll(() => server.app.io.engine.clientsCount).toBe(2);
+      expect(await a.request('chat:send', { sessionId, text: 'back again' })).toEqual({ ok: true });
+      expect(await b.next<ChatMessagePayload>('chat:message')).toMatchObject({
+        text: 'back again',
+      });
+      expect(b.unreadCount('session:ended')).toBe(0);
+      expect(a.unreadCount('connection:reset')).toBe(0);
+      expect(server.app.matchmaker.stats()).toMatchObject({ clients: 2, sessions: 1 });
+      server.app.matchmaker.assertInvariants();
+    });
+
+    it('they receive what the partner sent into the dead connection', async () => {
+      await start();
+      const a = await server.connect({}, { reconnects: true });
+      const b = await server.connect();
+      const sessionId = await pair(a, b);
+
+      a.dropConnection({ unnoticed: true, stayAway: true });
+      // The server thinks this was delivered; it went into the dead connection.
+      expect(await b.request('chat:send', { sessionId, text: 'can you hear me?' })).toEqual({
+        ok: true,
+      });
+      await b.sync();
+      await a.comeBack();
+
+      expect(await a.next<ChatMessagePayload>('chat:message')).toMatchObject({
+        sessionId,
+        text: 'can you hear me?',
+      });
+    });
+
+    it('the call is still there long after the grace period', async () => {
+      await start();
+      const a = await server.connect({}, { reconnects: true });
+      const b = await server.connect();
+      await pair(a, b);
+
+      a.dropConnection({ unnoticed: true });
+      await a.waitUntilConnected();
+      await wait(GRACE_MS * 2);
+
+      await b.sync();
+      expect(b.unreadCount('session:ended')).toBe(0);
+      expect(server.app.matchmaker.stats().sessions).toBe(1);
+    });
+
+    it('someone who was waiting is told to start again, and leaves no ghost behind', async () => {
+      await start();
+      const a = await server.connect({}, { reconnects: true });
+      await a.request('queue:join');
+      await a.next('queue:waiting');
+
+      a.dropConnection({ unnoticed: true });
+      await a.waitUntilConnected();
+
+      await a.next('connection:reset');
+      expect(server.app.matchmaker.stats()).toMatchObject({ clients: 1, waiting: 0 });
+      expect(server.app.io.of('/').sockets.size).toBe(1);
+      expect(await a.request('queue:join')).toEqual({ ok: true });
+      server.app.matchmaker.assertInvariants();
+    });
+  });
+
   describe('someone in a call who does not come back in time', () => {
     it('the partner is told once the grace period is over, not before', async () => {
       await start();

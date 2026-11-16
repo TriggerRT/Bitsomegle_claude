@@ -1,18 +1,18 @@
 # Bitsomeggle — Project Status
 
-_Last updated: 2026-11-16 (M6 code done; not deployed, live load test and manual tests pending)_
+_Last updated: 2026-11-16 (M6 deployed; a fix for real network drops is written but not deployed)_
 
 ## Phase
 **M5 is complete:** the beta is online at https://bitsomegle-claude.vercel.app with the relay working, and all ten M5 manual tests are confirmed.
 
-**M6 (reliability): the code is written and tested locally, but not committed, pushed or deployed.** Still open: the load test against the live server (decides whether the free plan is enough), and manual tests M6-1 to M6-6 ([MANUAL_TESTS.md](MANUAL_TESTS.md)). See [TODO.md](TODO.md).
+**M6 (reliability) is deployed, and manual testing found a real fault:** a call did not survive a real Wi-Fi drop (M6-1, M6-2). The cause is found and fixed (D-042), with tests that reproduce it, but **the fix is not committed or deployed yet**, so the live site still has the fault. The load test against the live server passed: the free plan is enough for 300 people (D-043). Still open: deploy the fix, then repeat M6-1 and M6-2, and do M6-3 and M6-5 ([MANUAL_TESTS.md](MANUAL_TESTS.md)). See [TODO.md](TODO.md).
 
 ## What exists
 | Item | Status |
 |---|---|
 | Product brief ([MASTER_PROMPT.md](MASTER_PROMPT.md)) | Done |
 | Architecture ([ARCHITECTURE.md](ARCHITECTURE.md)) | Server (§3, §4) and web app (§5) implemented |
-| Decision log ([DECISIONS.md](DECISIONS.md)) | D-001 … D-041 |
+| Decision log ([DECISIONS.md](DECISIONS.md)) | D-001 … D-043 |
 | `CLAUDE.md` (repo root) | Done |
 | Git repository | Branch `main`, pushed to private GitHub repo `TriggerRT/Bitsomegle_claude` |
 | npm workspaces: `packages/shared`, `apps/server`, `apps/web` | Implemented, tested |
@@ -34,12 +34,12 @@ _Last updated: 2026-11-16 (M6 code done; not deployed, live load test and manual
 | TURN relay credentials from Cloudflare (`apps/server/src/turn/`) | Implemented, tested with a stand-in for Cloudflare. With the real key on Render: credentials fetched, and a relay-only call connected (M5-3, confirmed by user 2026-11-14) |
 | Per-IP connection cap (`apps/server/src/socket/ipLimit.ts`) | Implemented, tested. Render does send `true-client-ip` (seen in the live log, M5-4). The cap itself has not been reached on the live server |
 | Relay test switch (`?relay=1`) | Implemented, tested |
-| Reconnect grace: a call survives a short drop of the server connection (D-038) | Implemented, tested (server with pretend browsers; real browser windows with the connection cut on purpose). **Needs manual test** on real networks |
+| Reconnect grace: a call survives a short drop of the server connection (D-038, D-042) | Implemented, tested with drops the server is not told about (pretend browsers and real browser windows). The first version **failed on a real network** (M6-1, M6-2); the fix **needs manual test** after deployment |
 | Rejoin after a server restart or long drop; "Reconnecting…" banner | Implemented, tested |
 | Rescue of a broken video call: one ICE restart (D-039) | Implemented, tested against a stand-in for the browser's call object. **Needs manual test**: never seen on a real broken call |
 | Video bitrate cap, 600 kbit/s (D-040) | Implemented, tested in Chromium |
 | Stats log line once a minute (D-041) | Implemented, tested; seen in a local run |
-| Load-test tool (`npm run loadtest`) | Implemented; run locally with 300 users. **Not yet run against the live server** |
+| Load-test tool (`npm run loadtest`) | Implemented; run locally and against the live server with 300 users (D-043) |
 | Deployment files: `render.yaml`, `apps/web/vercel.json`, `.github/workflows/wake-server.yml` | Implemented. Render and Vercel both built and deployed from them (2026-11-14). The wake-up job is still inactive and **untested** |
 | Deployment guide ([DEPLOYMENT.md](DEPLOYMENT.md)) | Followed by the user on real accounts (2026-11-14). Corrected where reality differed: Cloudflare asks for a card, and Vercel needed a different install command |
 
@@ -57,7 +57,7 @@ Status words: Implemented / Tested / Partially tested / Untested / Needs manual 
 | TURN relay | Working on the live site: relay-only calls connected, including from campus Wi-Fi (M5-3, M5-7, confirmed by user) |
 | Opening-hours window | Server: tested. Countdown UI: implemented, logic unit-tested, not exercised in a browser test |
 | Rate limiting | Tested (M2). Numbers to be tuned after beta |
-| Surviving connection drops | Tested with simulated drops (M6). **Needs manual test** on real networks (M6-1 to M6-3) |
+| Surviving connection drops | Failed on real networks in the first M6 version; fixed and tested with realistic simulated drops. **Needs manual test** again (M6-1 to M6-3) |
 | Report & skip / moderation hooks | Not started |
 | Deployment | Live since 2026-11-14. Laptop, phone ↔ laptop and two-network calls confirmed by the user (M5-2, M5-5, M5-6) |
 
@@ -68,7 +68,17 @@ Status words: Implemented / Tested / Partially tested / Untested / Needs manual 
 - Bug-injection check: 9 deliberate bugs were added one at a time (stale guard removed, partner left in queue, half-ended session, duplicate join, ghost left in queue, two impolite peers, avoid list ignored, fallback removed, client not deleted). The tests failed for all 9. The original code was then restored.
 - Coverage of `matchmaking/`: every line of real logic runs in tests. The only lines not run are the "this should never happen" alarms.
 
-## Test evidence (M6)
+## Test evidence (M6, after the first manual tests, 2026-11-16)
+- **Reported by the user on the live site:** M6-1 (Wi-Fi off for 3 s) and M6-2 (Wi-Fi to mobile data) **failed**: the "Reconnecting…" banner appeared, then the start page with "Your connection dropped, so the chat ended." M6-4 (closing the tab) passed. M6-3 and M6-5 were not reported.
+- **Cause and fix:** D-042. `npm run check`: **411 tests** pass. `npm run e2e`: **25 browser tests** pass. `npm run build` succeeds.
+- **The failure is now reproduced by tests.** Drops are simulated the way real networks fail (the server is not told). With the fix removed, 3 server tests and 3 browser tests fail; with it they pass. Four more deliberate bugs in the fix itself are caught (44 injected in M6 in total, all caught).
+- **Load test against the live server (M6-6), run by Claude at the user's request:** 300 pretend users for 120 s. All connected; 5,054 chat requests, 1,138 joins, 865 Next presses, 18,009 call-setup messages; nothing refused, dropped or unanswered. Median answer 105 ms, 95% within 115 ms, 99% within 170 ms, slowest 421 ms. About 100 ms of that is the network trip to Singapore. The server's own stats lines for those two minutes (pasted by the user): 301 connected, about 140 calls, event-loop delay p99 1 to 2 ms, at most 102 ms, memory up to 123 MB. It was close to idle.
+- **Not verified:**
+  - **the fix on a real network.** It is not deployed. M6-1 and M6-2 must be repeated;
+  - M6-3 (long drop) and M6-5 (server restart);
+  - a real broken video call being rescued. In M6-1 and M6-2 the chat ended before that code could matter.
+
+## Test evidence (M6, before deployment)
 - `npm run check` passes: lint, typecheck, **407 tests**. `npm run e2e`: **25 browser tests** pass, twice in a row. `npm run build` succeeds.
 - New in M6 (60 unit and integration tests, 7 browser tests):
   - Server, with pretend browsers whose connection is cut without a goodbye: a call is kept when they return in time; the give-up timer is cancelled; messages sent meanwhile are delivered; a partner's Next during the gap is learned on return; returning works even when the server is full; not returning ends the call for the partner after the grace period and not before; a late return is told `connection:reset` and can start again. No grace for people waiting, deliberate goodbyes, old copies of the app, or when switched off.
@@ -154,7 +164,9 @@ Status words: Implemented / Tested / Partially tested / Untested / Needs manual 
 - Chat and call-setup messages stay in the server's memory for up to about 90 s so they can be replayed after a reconnect. They are never written to disk or logged.
 - With only two people online, skipping each other re-pairs them immediately (D-020, by design for now).
 - ⚠️ **Leaked secret in old code:** `reference/omegle_2077…/web/.env.local` contains a real ZegoCloud server secret (it was also exposed to browsers through a `NEXT_PUBLIC_` variable). **Action for the user:** rotate it or delete that ZegoCloud project. Since M0, `.gitignore` excludes `reference/**/.env*` and the zip; a `git add` dry run confirmed no env file, zip or `node_modules` would be staged.
-- Render free tier: 0.1 CPU. Unknown whether it handles ~300 concurrent sockets smoothly. The tool to measure it exists; the live run is still to do (M6-6).
+- **Live site today:** a call does not survive a real Wi-Fi drop or network switch (D-042). Fixed in the working tree, not deployed.
+- A drop longer than about 15 s can still end the call even if the person returns within the server's waiting time, because Socket.IO can only replay messages it still remembers. Acceptable for now.
+- Render free tier handled 300 simulated people (D-043). A real crowd arriving within one minute has not been simulated.
 - **The Cloudflare relay is live and has no spending cap** (1,000 GB a month included, then $0.05 per GB, D-037). Check that the $1 budget alert exists (DEPLOYMENT part 1, step 4). Video is now capped at 600 kbit/s; the automatic cut-off is deferred (D-040).
 
 ## Environment variables

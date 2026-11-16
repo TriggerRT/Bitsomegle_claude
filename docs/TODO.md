@@ -75,16 +75,21 @@ Milestones in order. Each one ends **tested** and with the docs updated. Details
 - [x] M5-7 to M5-10 confirmed by user (2026-11-16): campus Wi-Fi through the relay, other browsers, a real second person, sleep and wake
 - [ ] Later: choose opening hours; set `OPEN_WINDOWS`, the wake-up time and `SERVER_URL` (DEPLOYMENT part 6)
 
-## M6 — Reliability hardening · code ✅ (2026-11-16) · live load test and manual tests pending
+## M6 — Reliability hardening · deployed (2026-11-16) · one fix waiting to be deployed, then manual tests
 - [x] Reconnect grace: a call survives a short drop of the server connection (D-038)
 - [x] Server-restart behaviour: waiting people rejoin by themselves; a lost call is explained on the start page
 - [x] One ICE restart when a call fails or stays interrupted (D-039)
 - [x] Video bitrate capped at 600 kbit/s (D-040)
 - [x] "Online" number sent every 15 s (shown on the page in M7)
 - [x] Stats line in the server log once a minute; load-test tool `npm run loadtest`, run locally with 300 users (D-041)
-- [ ] Commit and push M6; CI green; Render and Vercel redeploy
-- [ ] **Load test against the live server** at a quiet time (M6-6) → decide whether the free plan is enough (D-009)
-- [ ] **Needs manual test:** M6-1 to M6-5 (Wi-Fi blip, Wi-Fi to mobile data, long drop, tab close, server restart)
+- [x] Commit and push M6; deployed
+- [x] Load test against the live server (M6-6): 300 pretend users, no failures → the free plan is enough (D-043)
+- [x] M6-4 closing the tab: confirmed by user
+- [x] M6-1 and M6-2 **failed** on the live site → cause found and fixed: the server had not noticed the drop (D-042)
+- [ ] Commit and push the fix; CI green; Render redeploys
+- [ ] **Needs manual test (again):** M6-1 Wi-Fi blip, M6-2 Wi-Fi to mobile data
+- [ ] **Needs manual test:** M6-3 long drop, M6-5 server restart
+- [x] Stats lines from Render's log during the load test: p99 delay 1 to 2 ms, memory up to 123 MB (D-043)
 - [ ] Deferred: stop handing out TURN credentials automatically near 1,000 GB a month. Needs a read-only Cloudflare analytics token. Do it when monthly relay use passes about 200 GB or before a campus-wide announcement (D-040)
 
 ## M7 — Safety + UX polish

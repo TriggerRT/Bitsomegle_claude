@@ -19,6 +19,7 @@ import type { MatchEffect } from '../matchmaking/types.ts';
 import type { OpenStatus } from '../schedule/openHours.ts';
 import { ConnectionCounter, clientIpOf, KNOWN_IP_HEADERS } from './ipLimit.ts';
 import { RateLimiter, type RateLimits } from './rateLimit.ts';
+import { ResumeAdapter } from './resumeAdapter.ts';
 
 /**
  * Events we SEND are fully typed. Events we RECEIVE are deliberately left untyped
@@ -97,6 +98,8 @@ export function attachSocketServer(
     // Lets a browser whose connection dropped come back as the SAME client, and receive
     // whatever was sent to it in the meantime. See "Reconnect grace" further down.
     ...(options.reconnectGraceMs > 0 && {
+      // Also handles a browser that is back before the server noticed it was gone.
+      adapter: ResumeAdapter,
       connectionStateRecovery: {
         // Socket.IO can only restore a connection if it still remembers the last message
         // that browser received. The regular status message below guarantees one at most

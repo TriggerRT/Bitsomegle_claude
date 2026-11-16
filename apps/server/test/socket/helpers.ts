@@ -98,13 +98,26 @@ export class TestClient {
   }
 
   /**
-   * Cuts the connection the way a network problem would: without saying goodbye.
+   * Cuts the connection without saying goodbye.
+   *
+   * By default the server sees the connection close (as when a browser crashes).
+   * With `unnoticed`, only this side knows: the server still believes the connection is
+   * alive. That is what really happens when Wi-Fi drops or a phone changes network.
+   *
    * A client created with `reconnects` comes back by itself a moment later, unless
    * `stayAway` is set; then call `comeBack()` when the test wants it to return.
    */
-  dropConnection({ stayAway = false } = {}): void {
+  dropConnection({ stayAway = false, unnoticed = false } = {}): void {
     if (stayAway) this.socket.io.reconnection(false);
-    this.socket.io.engine.close();
+    const engine = this.socket.io.engine;
+    if (!unnoticed) {
+      engine.close();
+      return;
+    }
+    // Abandon the connection without closing it: "closing" does nothing on the wire,
+    // and the client then carries on as if the network had gone.
+    (engine.transport as unknown as { doClose: () => void }).doClose = () => {};
+    (engine as unknown as { _onClose: (reason: string) => void })._onClose('transport close');
   }
 
   /** Reconnects after `dropConnection({ stayAway: true })` or after being disconnected. */

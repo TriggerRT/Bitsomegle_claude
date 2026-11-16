@@ -19,6 +19,9 @@ import {
  * itself goes directly between the two browsers, so in these tests it is never cut;
  * only the connection that carries text and "who is matched with whom" is.
  *
+ * Unless a test says otherwise the drop is one the server does not notice, because that
+ * is how real networks fail: nobody tells the server that someone's Wi-Fi went off.
+ *
  * The test server keeps a call for 1.5 seconds (playwright.config.ts); production: 10.
  */
 
@@ -26,8 +29,13 @@ test.afterEach(async ({ browser }) => closeEveryone(browser));
 
 /** The test's remote control for one person's connection to the server. */
 interface Network {
-  /** Cuts the connection. With `stayOffline`, it cannot be re-established until `restore()`. */
-  drop: (options?: { stayOffline: boolean }) => Promise<void>;
+  /**
+   * Cuts the connection the way a real network problem does: the page finds out, the
+   * server does NOT (to the server the connection still looks alive).
+   * - `stayOffline`: the connection cannot be re-established until `restore()`.
+   * - `serverNotices`: the server is told too, as when a browser crashes.
+   */
+  drop: (options?: { stayOffline?: boolean; serverNotices?: boolean }) => Promise<void>;
   restore: () => void;
 }
 
@@ -37,7 +45,7 @@ async function openPersonWithNetwork(
   beforeLoad?: () => void,
 ): Promise<{ page: Page; network: Network }> {
   let offline = false;
-  const open: Array<{ page: WebSocketRoute; server: WebSocketRoute }> = [];
+  const open: Array<{ page: WebSocketRoute; server: WebSocketRoute; cut: boolean }> = [];
 
   const page = await openPerson(browser, beforeLoad, '/', async (newPage) => {
     // Every WebSocket the app opens to the server passes through here.
@@ -46,19 +54,30 @@ async function openPersonWithNetwork(
         ws.close();
         return;
       }
-      open.push({ page: ws, server: ws.connectToServer() });
+      const server = ws.connectToServer();
+      // Pass an ordinary close on to the other side ourselves. (Installing these handlers
+      // switches off Playwright's automatic forwarding, so that `drop()` below can close
+      // one side only.)
+      const link = { page: ws, server, cut: false };
+      ws.onClose((code, reason) => {
+        if (!link.cut) void server.close({ code, reason });
+      });
+      server.onClose((code, reason) => {
+        if (!link.cut) void ws.close({ code, reason });
+      });
+      open.push(link);
     });
     // So do its ordinary requests to the server (Socket.IO starts with those).
     await newPage.route(/\/socket\.io\//, (route) => (offline ? route.abort() : route.continue()));
   });
 
   const network: Network = {
-    drop: async ({ stayOffline } = { stayOffline: false }) => {
+    drop: async ({ stayOffline = false, serverNotices = false } = {}) => {
       offline = stayOffline;
-      // Both ends are closed, as when a network path really breaks.
-      for (const ws of open.splice(0)) {
-        await ws.server.close();
-        await ws.page.close();
+      for (const link of open.splice(0)) {
+        link.cut = true; // from now on nothing is passed between the two sides
+        if (serverNotices) await link.server.close();
+        await link.page.close();
       }
     },
     restore: () => {
@@ -125,7 +144,9 @@ test('staying offline too long ends the chat for both, and the camera goes off',
   const bob = await openPerson(browser);
   await startChatBetween(alice, bob);
 
-  await network.drop({ stayOffline: true });
+  // Here the server is told. Otherwise it would first take up to 20 seconds to find out
+  // for itself that Alice is gone, and only then start waiting for her.
+  await network.drop({ stayOffline: true, serverNotices: true });
 
   // Bob is told once the server has stopped waiting for Alice.
   await expect(bob.getByText('Stranger disconnected.')).toBeVisible({ timeout: 10_000 });

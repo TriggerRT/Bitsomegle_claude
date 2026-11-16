@@ -293,3 +293,25 @@ _(Node version detail refined in D-018: ≥22.12 locally, 24 LTS in production.)
 - **Stats line:** while anyone is connected the server logs, once a minute, people online, waiting, calls, event-loop delay and memory. It answers "how busy was it tonight?" and "was the server keeping up?" from Render's log. Counts only.
 - **Local result (laptop, not Render):** 300 users for 75 s: every request answered, chat p95 2 ms, nothing refused or dropped.
 - **Not done yet:** the run against the live Render server, which is what decides D-009 (free plan or paid). It needs the M6 code deployed first, and a quiet moment, because real visitors online would be matched with pretend users.
+
+## D-042 — Resuming when the server has not noticed the drop (M6, found by manual test)
+*Accepted · 2026-11-16 · corrects a gap in D-038*
+- **What happened:** manual tests M6-1 (Wi-Fi off for 3 s) and M6-2 (Wi-Fi to mobile data) failed on the live site. The browser showed "Reconnecting…", came back, and landed on the start page with "Your connection dropped, so the chat ended."
+- **Cause:** when Wi-Fi goes off, nothing tells the server. The old connection looks alive there until a health check fails, up to 20 s later. The browser knows at once and reconnects within seconds. Socket.IO only restores a connection it has already seen close, so the returning browser was treated as a new visitor.
+- **Why the tests missed it:** every simulated drop closed both ends of the connection. A real network failure closes neither; each side has to find out for itself.
+- **Fix (`socket/resumeAdapter.ts`):** a browser asking to be restored proves it knows the connection's private id, which only it was told. If a connection with that id still looks alive on the server, it is closed first, as if the network had reported the drop, and then restored as usual. This uses two Socket.IO internals (`pid`, `_onclose`); versions are pinned and tests cover it.
+- **Also:** the web app now retries every 0.5 to 2 s after a drop (Socket.IO's default grows to 5 s), so less of the grace period is wasted.
+- **Tests now simulate drops the realistic way** (server not told), in the server tests and in real browser windows. With the fix removed, 3 server tests and 3 browser tests fail.
+- **Lesson:** a simulated failure has to fail the way the real thing does. "Both ends closed" was a convenient shortcut that tested a case real networks rarely produce.
+- **Still to confirm:** M6-1 and M6-2 again on the live site once this is deployed.
+
+## D-043 — Render's free plan is enough for 300 people at once (M6)
+*Accepted · 2026-11-16 · answers the "revisit" question in D-009*
+- **Measured:** 300 pretend users against the live server for 120 s (`npm run loadtest`), run from the user's laptop in India.
+- **Result:** all 300 connected; 5,054 chat requests, 1,138 joins, 865 Next presses and 18,009 call-setup messages; nothing refused, dropped or unanswered. Answer times: median 105 ms, 95% within 115 ms, 99% within 170 ms, slowest 421 ms.
+- **Reading it:** about 100 ms of every answer is the trip to Singapore and back. The server itself adds roughly 10 ms for most requests, so it was not struggling.
+- **Decision:** stay on the free plan. No paid plan is needed for the expected 20 to 300 people.
+- **The server's own view (stats lines from Render's log, pasted by the user):** with 301 connected and about 140 calls, `loopDelayP99Ms` was 1 to 2, `loopDelayMaxMs` 82 to 102, memory 108 to 123 MB of the 512 MB allowed. So 99% of the time work started within 2 ms of when it should have: the server was close to idle.
+- **Limits of this test:** pretend users are steadier than a real crowd arriving in one minute; it ran for two minutes, not a whole evening.
+- **Seen in passing:** with one idle visitor the log sometimes shows a single pause of about 190 ms in a minute (`loopDelayMaxMs`), while the p99 stays at 1 ms. Most likely the shared free machine or memory clean-up. Too rare and too short to notice; worth a second look only if it grows.
+- **Revisit when:** the stats line shows `loopDelayP99Ms` above about 100 during real use, or peak attendance passes about 300.

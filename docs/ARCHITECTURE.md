@@ -121,6 +121,7 @@ With session IDs: the server drops any event whose `sessionId` isn't the sender'
 | `socket/socketServer.ts` | The only place sockets and the Matchmaker meet. For each event: rate limit → validate (zod) → call the Matchmaker → deliver the returned effects. Handlers are never `async` | Yes |
 | `app.ts` | Builds the whole server (HTTP + Socket.IO + Matchmaker) without listening. `index.ts` starts it; tests create private instances | Yes |
 | `socket/rateLimit.ts` | Token buckets per socket per event type | — |
+| `socket/resumeAdapter.ts` | Lets a browser be restored after a drop the server had not noticed yet (§3.5) | Yes |
 | `socket/ipLimit.ts` | Counts connections per IP address for the per-IP cap; works out the visitor's address behind the hosting proxy | — |
 | `turn/iceServers.ts` | The `IceServerSource` interface (`getIceServers()` is synchronous) and the STUN-only source | — |
 | `turn/cloudflareTurn.ts` | Fetches short-lived TURN credentials from Cloudflare in the background and keeps the latest in memory (§3.8) | — |
@@ -177,6 +178,7 @@ Only the **partner** receives `session_ended`. The client who pressed Next or Le
   - **Only people in a call get this.** Someone waiting is removed at once, so nobody is matched with a person who isn't there. Their browser rejoins the queue by itself when it reconnects (§5.2).
   - **A deliberate goodbye gets no grace:** Leave, closing the tab or navigating away (the web app sends `leave` when the page is left).
   - **How the same client comes back:** Socket.IO's "connection state recovery" restores a dropped connection under its old id and replays what it missed. It can only do so if it still remembers the last message that browser received, and it forgets messages after a while. So the server sends everyone a small `status` message every 15 s (which also keeps the "online" number current). That guarantees a recent message always exists (D-038).
+  - **The server usually does not know about the drop.** When Wi-Fi goes off, nothing tells the server; the old connection looks alive until a health check fails, up to 20 s later. The browser knows at once and is often back first. So when a browser asks to be restored and its old connection still looks alive, `socket/resumeAdapter.ts` closes that connection first and then restores it (D-042).
   - **A browser that comes back too late** may still be restored by Socket.IO, after the server has given up its place. It would believe nothing changed, so the server sends it `connection:reset`.
   - Older copies of the web app (a tab left open across an update) don't know about any of this. Browsers that do announce `protocol: 2` when connecting, and only they get a grace period.
 - **Server restart / deploy:** all in-memory state is lost and every connection drops. Browsers reconnect by themselves, as brand-new connections. Someone who was waiting rejoins the queue automatically. Someone who was in a call lands on the start page with "Your connection dropped, so the chat ended." Nothing needs to survive a restart, and calls in progress can't be handed to the new server anyway.
@@ -369,6 +371,6 @@ _Implemented in M4._
 ---
 
 ## 7. Scaling path (not needed now)
-1. Upgrade the single instance (Render Starter $7/mo, or Fly.io Mumbai ~$2–3/mo) if the 0.1-CPU free tier lags under load.
+1. Upgrade the single instance (Render Starter $7/mo, or Fly.io Mumbai ~$2–3/mo) if the free tier lags under load. Measured in M6: it handled 300 simulated people comfortably (D-043).
 2. Multiple instances → Socket.IO Redis adapter + Redis-backed matchmaking with atomic Lua scripts, behind the same `Matchmaker` interface.
 3. Persistent reports/bans → free Postgres (Neon/Supabase).

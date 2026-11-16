@@ -215,13 +215,16 @@ Report: roughly how long it took.
 
 ## M6 — Reliability on real networks
 
-Do these on the live site **after M6 has been pushed and Render shows the new version as
-Live**. Use two devices where it says so; a phone and a laptop are ideal.
+Do these on the live site **after the latest version has been pushed and Render shows it
+as Live**. To be sure you are testing the new version, reload the page on both devices
+first. Use two devices where it says so; a phone and a laptop are ideal.
 
 Automated tests cut the connection in a simulated way. Only these tests show what real
 Wi-Fi and mobile networks do.
 
-### M6-1 A short Wi-Fi blip — _Needs manual test_
+### M6-1 A short Wi-Fi blip — _Failed (2026-11-16); fixed, needs manual test again after the fix is deployed_
+> First try: the banner appeared, then the start page with "Your connection dropped, so
+> the chat ended." Cause: the server had not noticed the drop (DECISIONS D-042).
 1. Start a call between a laptop and a phone.
 2. On the laptop, switch Wi-Fi **off**, count to three, switch it **on** again.
 
@@ -233,7 +236,8 @@ On the phone: the picture freezes and then recovers. It must **not** say "Strang
 disconnected."
 Report: roughly how many seconds until video was back, and what each screen showed.
 
-### M6-2 Phone switches from Wi-Fi to mobile data — _Needs manual test_
+### M6-2 Phone switches from Wi-Fi to mobile data — _Failed (2026-11-16); fixed, needs manual test again after the fix is deployed_
+> First try: same result and same cause as M6-1.
 1. Start a call with the phone on Wi-Fi (mobile data also enabled).
 2. On the phone, switch Wi-Fi off, so it falls back to mobile data.
 
@@ -249,7 +253,7 @@ Press Next to meet someone new."
 On the device that was offline: once it is back online, the start page with "Your
 connection dropped, so the chat ended.", and the camera light off.
 
-### M6-4 Closing the tab — _Needs manual test_
+### M6-4 Closing the tab — _Confirmed (2026-11-16)_
 1. Start a call between two devices (or two windows).
 2. Close the tab on one of them.
 
@@ -267,7 +271,10 @@ Then the two that were in a call show the start page with "Your connection dropp
 chat ended.", and the third goes back to "Looking for someone…" **by itself**, without
 you pressing anything.
 
-### M6-6 Load test on the live server — _Needs manual test (Claude can run it; you choose when)_
+### M6-6 Load test on the live server — _Confirmed (2026-11-16, run by Claude at your request)_
+> Result: 300 of 300 connected, nothing refused or unanswered, 95% of answers within
+> 115 ms. Render's log for those minutes: `loopDelayP99Ms` 1 to 2, memory up to 123 MB
+> (DECISIONS D-043).
 This decides whether Render's free plan is enough. It connects 300 pretend users for two
 minutes. **Real visitors online at that moment would be matched with them**, so pick a
 time when nobody is expected.
