@@ -125,7 +125,8 @@ With session IDs: the server drops any event whose `sessionId` isn't the sender'
 | `socket/ipLimit.ts` | Counts connections per IP address for the per-IP cap; works out the visitor's address behind the hosting proxy | — |
 | `turn/iceServers.ts` | The `IceServerSource` interface (`getIceServers()` is synchronous) and the STUN-only source | — |
 | `turn/cloudflareTurn.ts` | Fetches short-lived TURN credentials from Cloudflare in the background and keeps the latest in memory (§3.8) | — |
-| `moderation/ModerationSink.ts` | Interface for reports and abuse events. v1 writes structured logs (no content); later could write to a DB | — |
+| `moderation/ReportTracker.ts` | Remembers who reported whom; starts a cooldown when several different people report the same person (§3.9) | No |
+| `moderation/ModerationSink.ts` | Where reports and cooldowns are recorded. Today the server log (ids and a reason from a fixed list, never content); later it could be a database | No |
 | `schedule/openHours.ts` | "Is the site open now? When does it open or close?" (IST windows from config) | — |
 | `ops/statsLog.ts` | One log line a minute while anyone is connected: people online, waiting, calls, how well the server is keeping up (event-loop delay) and memory. Counts only | — |
 | `config.ts` | Reads and validates env vars at startup; crashes early if something is missing | — |
@@ -160,6 +161,7 @@ Every operation returns a list of **effects**: `waiting`, `matched{sessionId, po
 | `connect(c)` | Register as `idle`. A second connect for the same id is a no-op |
 | `join(c)` | If already `waiting` or `in_session` → no-op (idempotent: duplicate clicks or events are harmless). Otherwise `findPartner`; if found → create session; else → enqueue |
 | `next(c, sessionId, {avoidPartner?})` | **In that session** → end it (partner gets `session_ended{reason:'partner_next'}` and becomes `idle`), then queue or match c. **In a different, newer session** → stale request, ignored (a double click can never skip a partner you haven't seen). **Idle** (partner already left) → same as `join`. **Waiting** → no-op. `avoidPartner` also puts the skipped partner on c's avoid list (used by "Report & skip" in M7) |
+| `report(c, sessionId, {requeue})` | "Report and skip". **Current session** → end it (the partner is told `partner_next`, the same as an ordinary skip), never pair the two again, and with `requeue` look for someone new. **The session that ended last** → only add to the avoid list, so someone who left first can still be reported. Any other session → nothing |
 | `leave(c)` | Leave the queue or end the current session (partner gets `reason:'partner_left'`), become `idle`. Takes no session id: see DECISIONS D-019 |
 | `disconnect(c)` | Remove from queue and from any session (partner gets `reason:'partner_disconnected'`), delete client |
 | `getPartner(c, sessionId)` | The partner's id, but only if `sessionId` is c's **current** session. The relay layer (M2) uses this, so a late message from an old conversation is never delivered |
@@ -205,11 +207,25 @@ Each connected browser has its own set of **token buckets** (explained in `rateL
 | `chat:send` | 5 | 2 / s |
 | `signal` | 100 | 30 / s (call setup sends 20–40 small messages at once) |
 | `media:state` | 6 | 2 / s |
+| `report` | 3 | 1 / 10 s |
 
 - A refused request (rate limited or invalid) costs a **strike**. Strikes have their own bucket (30, refilling one every 5 s). A browser that runs out is disconnected.
 - A single message larger than **32 KB** closes that connection.
 - At most `MAX_CLIENTS` (default 1000) browsers may be connected. Extra connections are refused with `server_full`.
 - **Per-IP cap** (`socket/ipLimit.ts`, M5): at most `MAX_CLIENTS_PER_IP` connections from one address (off by default; 500 on Render). It stops one computer from filling the server alone. It is deliberately generous because the whole campus can share one address (D-013). Behind Render's proxy the visitor's address is read from the header named in `CLIENT_IP_HEADER`. If that header is missing the connection is let in uncounted, and the server logs one warning. Addresses are held in memory only while their connections are open and are never logged.
+
+### 3.9 Reports and cooldown
+_Implemented in M7: `matchmaking/Matchmaker.ts` (`report`), `apps/server/src/moderation/`._
+
+**Report and skip.** The Report button names the chat it is about and a reason from a fixed list (nudity or sexual content, harassment or hate, spam or advertising, something else). No free text is collected.
+- The server checks the reporter was really matched with that person: only the current chat, or the one that ended last, can be reported.
+- The two are never paired again while both stay connected (the avoid list lives with the connection).
+- The reported person is told nothing about the report. Their chat ends with the same message as an ordinary Next.
+- Each report is recorded once per reporter and person: two random connection ids, the session id and the reason.
+
+**Cooldown.** When **3 different people** report the same person within **15 minutes**, that person is taken out of any queue or chat, told why (`moderation:cooldown`), and refused new matches for **10 minutes**. One person reporting repeatedly counts once.
+
+**An honest limit.** There are no accounts, so "a person" is one connection. Reloading the page gives a clean record. This slows down a careless offender and tells them it was noticed; it cannot stop a determined one. Stopping those needs identity, for example a BITS email sign-in (D-012, D-045).
 
 ### 3.8 TURN credentials
 _Implemented in M5: `apps/server/src/turn/`._
@@ -241,6 +257,7 @@ Client-to-server payloads are **zod schemas**, checked on the server for every m
 | `rate_limited` | Too many requests too quickly |
 | `closed` | Outside opening hours |
 | `not_in_session` | The message named a session the sender isn't in (any more) |
+| `cooldown` | Several people reported the sender, who can't be matched for a while (§3.9) |
 
 ### Client → Server
 | Event | Payload | Reply | Notes |
@@ -249,6 +266,7 @@ Client-to-server payloads are **zod schemas**, checked on the server for every m
 | `session:next` | `{sessionId}` | ack | End that session (if it's the current one) and look again |
 | `leave` | none | ack | Leave the queue or end the current session, go idle (D-019) |
 | `chat:send` | `{sessionId, text}` | ack | Text is trimmed; 1–1000 characters |
+| `report` | `{sessionId, reason}` | ack | "Report and skip" (§3.9). `reason` is one of `inappropriate`, `harassment`, `spam`, `other` |
 | `signal` | `{sessionId, description}` or `{sessionId, candidate}` | none | WebRTC call setup; relayed to the partner only |
 | `media:state` | `{sessionId, audio, video}` | none | So the partner can show "camera off" |
 
@@ -264,6 +282,7 @@ Client-to-server payloads are **zod schemas**, checked on the server for every m
 | `media:state` | `{sessionId, audio, video}` |
 | `server:error` | `{code}`: a request **without** an ack was refused |
 | `connection:reset` | none. Sent right after a reconnect when the server did **not** keep this browser's place (§3.5). The browser is now a fresh visitor |
+| `moderation:cooldown` | `{until}`. Sent to someone several people reported. They have already been removed from any queue or chat and can't be matched until `until` |
 
 **When connecting**, the web app announces `auth: {protocol: 2}`: "I understand that a call can be kept across a short drop". The number lives in `packages/shared` as `RESUME_PROTOCOL`.
 
@@ -272,7 +291,6 @@ Client-to-server payloads are **zod schemas**, checked on the server for every m
 - A relay event (`chat:send`, `signal`, `media:state`) is passed on only if it names the sender's **current** session.
 - A late `signal` or `media:state` for a session that has just ended is dropped silently. That's normal traffic (it was already on its way), not an error.
 - Fields that aren't in the schema are removed before relaying.
-- Not in the contract yet: `report` (M7).
 
 ---
 
@@ -287,7 +305,7 @@ Client-to-server payloads are **zod schemas**, checked on the server for every m
 | `services/localMedia.ts` | Asks for camera + microphone, maps browser errors to reasons, falls back to audio only, stops tracks |
 | `services/peer.ts` | One `RTCPeerConnection` per session: who offers first, perfect negotiation, call state |
 | `hooks/useChat.ts` | Creates a controller with the real services and re-renders React when it publishes a change |
-| `components/` | `Landing`, `MediaSetup` (permission prompt and problems), `Waiting` (with self-preview), `Conversation`, `VideoTile`, `MediaControls`, `ChatPanel` |
+| `components/` | `Landing` (with the rules and the people-here line), `MediaSetup` (permission prompt and problems), `Waiting` (with self-preview), `Conversation`, `VideoTile`, `MediaControls`, `ChatPanel`, `ReconnectingBanner`, `ReportDialog` |
 | `e2e/` | Playwright tests that drive real browser windows, with Chromium's pretend camera, against a real server |
 
 **Why a controller outside React (D-030).** The first call-setup message from the partner can arrive a few milliseconds after "you are matched". React runs its effects a little later, after drawing the screen. The controller reacts to each event immediately, so the call exists before the next message is handled.
@@ -326,6 +344,8 @@ Back to idle from any state: Leave, Cancel, Back, server refused, connection los
   - a brand-new connection, or the server sends `connection:reset` → a chat in progress is over: landing page with "Your connection dropped, so the chat ended.";
   - someone who was **waiting** stays on the waiting screen and the controller rejoins the queue for them.
 - **After every (re)connect the controller makes the server match the screen.** While offline the user may have pressed Next, Cancel or Leave. If the screen says "waiting", it sends `leave` then `queue:join`; if the connection was restored and the screen shows anything but a chat, it sends `leave`.
+- **Report (M7):** during a chat, Report acts like Next (straight to `waiting`) and the waiting screen says thanks. After the partner has left, the chat that just ended (`endedSessionId`) can still be reported; the screen stays and the button becomes "Reported".
+- **Cooldown (M7):** `moderation:cooldown` from the server, or a Start refused with `cooldown`, leads to the landing page with an explanation, camera off.
 - **partner_left** keeps the old messages readable but the message box is disabled. Messages are cleared on Next, Leave or a new match.
 - **Opening hours:** the landing page works out open/closed from the last `status` and a 1-second clock, so it flips at the right moment without asking the server. The server still refuses a Start while closed.
 - **Camera first (M4):** Start goes to `requesting_media`. Allowed → `waiting`. Refused or failed → `media_error` with a reason, where "Try again" asks again and "Back" returns to `idle`. Cancelling while the browser prompt is open wins over a late "Allow": the camera is switched straight off.
@@ -347,6 +367,8 @@ _Implemented in M4._
 
 ### 5.4 Layout
 - **Desktop:** partner's video large on the left with your own mirrored picture in its corner; text chat in a side panel on the right; Mute, Camera, Leave and Next under the video.
+- **Report** sits on the partner's video, top right. It opens a dialog (the browser's own `<dialog>`, so focus stays inside and Escape closes it) asking for the reason, which also prevents reporting by accident.
+- **Landing page:** Start, then how many people are here right now (refreshed every 15 s), then four short rules.
 - **Narrow screens (under 800 px):** video on top, text chat underneath, the four buttons in one row.
 - **Waiting screen:** your own camera preview, so you can check how you look before anyone sees you.
 
@@ -365,7 +387,7 @@ _Implemented in M4._
 | Logging | Event types + random ids only. **Never** chat text, SDP, ICE candidates or IPs |
 | Messages in memory | Chat text and call-setup messages are never written to disk or a log. Since M6 they are held in the server's memory for up to about 90 seconds, so that someone who reconnects after a short drop receives what they missed; then they are discarded |
 | Cross-site use | CORS allow-list = the frontend origin only |
-| Reports _(M7)_ | "Report & skip": ends session, adds partner to the reporter's avoid list for the window, emits a `ModerationSink` event. Several distinct reporters → temporary cooldown for that socket |
+| Reports | "Report and skip": ends the chat, the two are never paired again, the report is recorded (ids and a fixed reason only). Three different reporters within 15 minutes → a 10-minute cooldown for that connection (§3.9) |
 | Honest limit | With no identity, a determined abuser can reconnect. Moderation can only slow people down |
 
 ---

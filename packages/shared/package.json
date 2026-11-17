@@ -4,6 +4,7 @@
   "private": true,
   "description": "Client/server contract: event schemas, types and constants",
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": {
       "source": "./src/index.ts",

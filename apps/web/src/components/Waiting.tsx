@@ -33,6 +33,17 @@ export function Waiting({ chat }: WaitingProps) {
         </p>
       </div>
 
+      {state.thanksForReport && (
+        <p className="hint" role="status">
+          Thanks, your report was noted. You won't be matched with that person again.
+        </p>
+      )}
+      {!state.thanksForReport && state.status !== null && state.status.online <= 1 && (
+        <p className="hint">
+          Nobody else is online right now. Stay here and you'll be matched when someone arrives.
+        </p>
+      )}
+
       <div className="actions">
         <MediaControls
           state={state}

@@ -8,6 +8,8 @@ interface ClientRecord {
   state: ClientState;
   sessionId: SessionId | null;
   lastPartner: ClientId | null;
+  /** The session shared with `lastPartner`, so that person can still be reported. */
+  lastSessionId: SessionId | null;
   /**
    * Ids here are never cleaned up when the other client disconnects. That is safe:
    * ids are never reused, and this set is deleted together with its own client.
@@ -24,6 +26,14 @@ interface Session {
 export interface MatchmakerOptions {
   /** Replace the random session id generator (tests use this to get predictable ids). */
   generateSessionId?: () => SessionId;
+}
+
+export interface ReportResult {
+  /** Who was reported, or null if `sessionId` is neither the client's current nor last chat. */
+  reportedId: ClientId | null;
+  /** True if the report ended a chat that was still running. */
+  endedCurrentSession: boolean;
+  effects: MatchEffect[];
 }
 
 export interface NextOptions {
@@ -65,6 +75,7 @@ export class Matchmaker {
       state: 'idle',
       sessionId: null,
       lastPartner: null,
+      lastSessionId: null,
       avoid: new Set(),
     });
   }
@@ -117,6 +128,40 @@ export class Matchmaker {
   }
 
   /** The client's connection is gone: remove every trace of them and tell their partner. */
+  /**
+   * "Report and skip". The client will never be paired with the reported person again.
+   *
+   * `sessionId` may name:
+   * - the client's CURRENT chat: it ends (the partner is told the same as for an ordinary
+   *   Next, so they cannot tell they were reported), and with `requeue` the client goes
+   *   straight back to looking for someone;
+   * - the chat that ended LAST: nothing changes except the avoid list. This lets someone
+   *   report a person who misbehaved and then left first.
+   *
+   * Any other session id is not this client's to report, and nothing happens.
+   */
+  report(clientId: ClientId, sessionId: SessionId, options: { requeue: boolean }): ReportResult {
+    const nothing: ReportResult = { reportedId: null, endedCurrentSession: false, effects: [] };
+    const client = this.clients.get(clientId);
+    if (!client) return nothing;
+
+    if (client.state === 'in_session' && client.sessionId === sessionId) {
+      const effects = this.endSessionOf(client, 'partner_next');
+      const reportedId = client.lastPartner;
+      if (reportedId === null) throw new Error('Matchmaker bug: ended session left no partner');
+      client.avoid.add(reportedId);
+      if (options.requeue) effects.push(...this.enqueueOrMatch(client));
+      return { reportedId, endedCurrentSession: true, effects };
+    }
+
+    if (client.lastSessionId === sessionId && client.lastPartner !== null) {
+      client.avoid.add(client.lastPartner);
+      return { reportedId: client.lastPartner, endedCurrentSession: false, effects: [] };
+    }
+
+    return nothing;
+  }
+
   disconnect(clientId: ClientId): MatchEffect[] {
     const client = this.clients.get(clientId);
     if (!client) return [];
@@ -263,10 +308,12 @@ export class Matchmaker {
     client.state = 'idle';
     client.sessionId = null;
     client.lastPartner = partner.id;
+    client.lastSessionId = session.id;
 
     partner.state = 'idle';
     partner.sessionId = null;
     partner.lastPartner = client.id;
+    partner.lastSessionId = session.id;
 
     return [
       { type: 'session_ended', to: partner.id, sessionId: session.id, reason: reasonForPartner },

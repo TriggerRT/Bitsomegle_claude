@@ -765,4 +765,110 @@ describe('ChatController', () => {
       expect(stream.allStopped).toBe(true);
     });
   });
+
+  describe('report and skip', () => {
+    it('during a chat: reports the partner, closes the call and looks for someone new', async () => {
+      const { controller, socket, peers, state, startWithCamera, match } = setup();
+      const stream = await startWithCamera();
+      match('s1');
+
+      controller.report('harassment');
+
+      expect(socket.sentEvents('report')).toEqual([{ sessionId: 's1', reason: 'harassment' }]);
+      expect(peers[0]?.closed).toBe(true);
+      expect(state()).toMatchObject({ phase: 'waiting', thanksForReport: true });
+      expect(stream.allStopped).toBe(false); // the camera stays on for the next partner
+      expect(socket.sentEvents('session:next')).toHaveLength(0); // the report does the skipping
+    });
+
+    it('if the server cannot find anyone new, goes back to the landing page', async () => {
+      const { controller, socket, state, startWithCamera, match } = setup();
+      const stream = await startWithCamera();
+      match('s1');
+      socket.replies.set('report', { ok: false, code: 'closed' });
+
+      controller.report('spam');
+      await settle();
+
+      expect(state()).toMatchObject({ phase: 'idle', notice: 'closed', thanksForReport: false });
+      expect(stream.allStopped).toBe(true);
+      expect(socket.sentEvents('leave')).toHaveLength(1);
+    });
+
+    it('after the partner left: reports that chat and stays on the same screen', async () => {
+      const { controller, socket, state, startWithCamera, match } = setup();
+      await startWithCamera();
+      match('s1');
+      socket.receive('session:ended', { sessionId: 's1', reason: 'partner_next' });
+
+      controller.report('inappropriate');
+
+      expect(socket.sentEvents('report')).toEqual([{ sessionId: 's1', reason: 'inappropriate' }]);
+      expect(state()).toMatchObject({ phase: 'partner_left', reported: true });
+      expect(socket.sentEvents('queue:join')).toHaveLength(1); // only the original one
+    });
+
+    it('the same person cannot be reported twice', async () => {
+      const { controller, socket, startWithCamera, match } = setup();
+      await startWithCamera();
+      match('s1');
+      socket.receive('session:ended', { sessionId: 's1', reason: 'partner_left' });
+
+      controller.report('spam');
+      controller.report('spam');
+
+      expect(socket.sentEvents('report')).toHaveLength(1);
+    });
+
+    it.each([
+      ['on the landing page', async () => {}],
+      ['while waiting', async (s: ReturnType<typeof setup>) => void (await s.startWithCamera())],
+    ])('does nothing %s', async (_name, prepare) => {
+      const s = setup();
+      await prepare(s);
+      const before = s.state();
+
+      s.controller.report('other');
+
+      expect(s.socket.sentEvents('report')).toHaveLength(0);
+      expect(s.state()).toBe(before);
+    });
+
+    it('does nothing while offline', async () => {
+      const { controller, socket, state, startWithCamera, match } = setup();
+      await startWithCamera();
+      match('s1');
+      socket.drop();
+
+      controller.report('spam');
+
+      expect(socket.sentEvents('report')).toHaveLength(0);
+      expect(state().phase).toBe('in_session');
+    });
+  });
+
+  describe('a cooldown ordered by the server', () => {
+    it('ends the chat, switches the camera off and explains on the landing page', async () => {
+      const { socket, peers, state, startWithCamera, match } = setup();
+      const stream = await startWithCamera();
+      match('s1');
+
+      socket.receive('moderation:cooldown', { until: 123 });
+
+      expect(peers[0]?.closed).toBe(true);
+      expect(stream.allStopped).toBe(true);
+      expect(state()).toMatchObject({ phase: 'idle', notice: 'cooldown' });
+    });
+
+    it('a refused Start during the cooldown shows the same explanation', async () => {
+      const { socket, state, startWithCamera } = setup();
+      socket.replies.set('queue:join', { ok: false, code: 'cooldown' });
+
+      const stream = await startWithCamera();
+      await settle();
+
+      expect(state()).toMatchObject({ phase: 'idle', notice: 'cooldown' });
+      expect(stream.allStopped).toBe(true);
+    });
+  });
 });

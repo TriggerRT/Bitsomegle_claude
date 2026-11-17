@@ -52,6 +52,8 @@ export interface RateLimits {
   /** WebRTC setup sends many small messages in a burst (often 20 to 40 ICE candidates). */
   signal: RateRule;
   media: RateRule;
+  /** Reports are rare. A slow refill stops anyone using them to flood the log. */
+  report: RateRule;
   /**
    * Refused requests (invalid or rate limited) are counted here. A browser that keeps
    * sending bad requests until this bucket is empty gets disconnected.
@@ -66,6 +68,7 @@ export const DEFAULT_RATE_LIMITS: RateLimits = {
   chat: { burst: 5, perSecond: 2 },
   signal: { burst: 100, perSecond: 30 },
   media: { burst: 6, perSecond: 2 },
+  report: { burst: 3, perSecond: 0.1 },
   strike: { burst: 30, perSecond: 0.2 },
 };
 

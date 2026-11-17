@@ -580,4 +580,100 @@ describe('the video call connection', () => {
     );
     expect(state).toMatchObject({ phase: 'partner_left', call: 'connected' });
   });
+
+  describe('report and skip', () => {
+    const report: ChatEvent = { type: 'report_requested' };
+    const partnerLeft: ChatEvent = {
+      type: 'session_ended',
+      sessionId: 's1',
+      reason: 'partner_next',
+    };
+
+    it('during a chat: moves straight on to looking for someone, with a thank-you', () => {
+      const state = play(connected, ...begin, matched('s1'), sent('hi'), report);
+      expect(state).toMatchObject({
+        phase: 'waiting',
+        sessionId: null,
+        messages: [],
+        thanksForReport: true,
+      });
+    });
+
+    it('the thank-you stays while waiting and goes when the next chat starts', () => {
+      const waiting = play(connected, ...begin, matched('s1'), report, { type: 'waiting' });
+      expect(waiting.thanksForReport).toBe(true);
+      expect(chatReducer(waiting, matched('s2')).thanksForReport).toBe(false);
+    });
+
+    it.each([
+      ['Leave', { type: 'leave_requested' }],
+      ['a refusal from the server', { type: 'request_refused', reason: 'closed' }],
+      ['a full server', { type: 'server_full' }],
+    ] as Array<[string, ChatEvent]>)('the thank-you goes after %s', (_name, event) => {
+      const state = play(connected, ...begin, matched('s1'), report, event);
+      expect(state.thanksForReport).toBe(false);
+    });
+
+    it('remembers which chat just ended, so that person can still be reported', () => {
+      const state = play(connected, ...begin, matched('s1'), partnerLeft);
+      expect(state).toMatchObject({ phase: 'partner_left', endedSessionId: 's1', reported: false });
+    });
+
+    it('after the partner left: marks the chat as reported and stays where it is', () => {
+      const state = play(connected, ...begin, matched('s1'), sent('hi'), partnerLeft, report);
+      expect(state).toMatchObject({ phase: 'partner_left', reported: true, endedSessionId: 's1' });
+      expect(state.messages).toHaveLength(1);
+      expect(state.thanksForReport).toBe(false);
+    });
+
+    it('a second report of the same person changes nothing', () => {
+      const once = play(connected, ...begin, matched('s1'), partnerLeft, report);
+      expect(chatReducer(once, report)).toBe(once);
+    });
+
+    it('Next forgets the ended chat', () => {
+      const state = play(connected, ...begin, matched('s1'), partnerLeft, report, {
+        type: 'next_requested',
+      });
+      expect(state).toMatchObject({ phase: 'waiting', endedSessionId: null, reported: false });
+    });
+
+    it.each([
+      ['on the landing page', []],
+      ['while waiting', begin],
+    ] as Array<[string, ChatEvent[]]>)('does nothing %s', (_name, events) => {
+      const before = play(connected, ...events);
+      expect(chatReducer(before, report)).toBe(before);
+    });
+  });
+
+  describe('a cooldown after being reported by several people', () => {
+    const cooldown: ChatEvent = { type: 'cooldown_started' };
+
+    it.each([
+      ['a chat', [...begin, matched('s1'), sent('hi')]],
+      ['the waiting screen', begin],
+      [
+        'the screen after a partner left',
+        [
+          ...begin,
+          matched('s1'),
+          { type: 'session_ended', sessionId: 's1', reason: 'partner_left' },
+        ],
+      ],
+      ['the landing page', []],
+    ] as Array<[string, ChatEvent[]]>)(
+      'from %s: back to the landing page with an explanation',
+      (_name, events) => {
+        const state = play(connected, ...events, cooldown);
+        expect(state).toMatchObject({
+          phase: 'idle',
+          notice: 'cooldown',
+          sessionId: null,
+          messages: [],
+          connection: 'connected',
+        });
+      },
+    );
+  });
 });

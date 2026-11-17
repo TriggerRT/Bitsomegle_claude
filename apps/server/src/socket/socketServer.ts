@@ -7,6 +7,7 @@ import {
   mediaStateSchema,
   nextSchema,
   RESUME_PROTOCOL,
+  reportSchema,
   type ServerToClientEvents,
   type StatusPayload,
   signalSchema,
@@ -16,6 +17,8 @@ import { type DefaultEventsMap, Server, type Socket } from 'socket.io';
 import type { ZodType } from 'zod';
 import type { Matchmaker } from '../matchmaking/Matchmaker.ts';
 import type { MatchEffect } from '../matchmaking/types.ts';
+import type { ModerationSink } from '../moderation/ModerationSink.ts';
+import type { ReportTracker } from '../moderation/ReportTracker.ts';
 import type { OpenStatus } from '../schedule/openHours.ts';
 import { ConnectionCounter, clientIpOf, KNOWN_IP_HEADERS } from './ipLimit.ts';
 import { RateLimiter, type RateLimits } from './rateLimit.ts';
@@ -71,6 +74,10 @@ export interface SocketServerOptions {
   statusIntervalMs: number;
   /** STUN/TURN servers handed to both browsers when they are matched. */
   getIceServers: () => IceServer[];
+  /** Counts reports and decides when someone is blocked from matching for a while. */
+  reports: ReportTracker;
+  /** Where reports and cooldowns are recorded. */
+  moderation: ModerationSink;
   logger: Logger;
   now: () => number;
 }
@@ -88,7 +95,13 @@ export function attachSocketServer(
   httpServer: HttpServer,
   options: SocketServerOptions,
 ): SocketServer {
-  const { matchmaker, getOpenStatus, logger, now } = options;
+  const { matchmaker, getOpenStatus, logger, now, reports, moderation } = options;
+
+  /** The one way a client leaves matchmaking for good. */
+  const removeClient = (clientId: string): void => {
+    deliver(matchmaker.disconnect(clientId));
+    reports.forget(clientId);
+  };
 
   const io: SocketServer = new Server(httpServer, {
     cors: { origin: [...options.corsOrigins] },
@@ -219,12 +232,12 @@ export function attachSocketServer(
         RECOVERABLE_DISCONNECTS.has(reason) &&
         matchmaker.getClient(clientId)?.state === 'in_session';
       if (!mayComeBack) {
-        deliver(matchmaker.disconnect(clientId));
+        removeClient(clientId);
         return;
       }
       const timer = setTimeout(() => {
         graceTimers.delete(clientId);
-        deliver(matchmaker.disconnect(clientId));
+        removeClient(clientId);
         logger.debug({ client: clientId }, 'client did not come back in time');
       }, options.reconnectGraceMs);
       timer.unref();
@@ -310,24 +323,57 @@ export function attachSocketServer(
     const ok: AckResult = { ok: true };
     const notInSession: AckResult = { ok: false, code: 'not_in_session' };
     const closed: AckResult = { ok: false, code: 'closed' };
+    const cooldown: AckResult = { ok: false, code: 'cooldown' };
+
+    /** Why this client may not be given a new partner right now, or null if it may. */
+    const matchingRefused = (): AckResult | null => {
+      if (!isOpen()) return closed;
+      if (reports.cooldownUntil(clientId, now()) !== null) return cooldown;
+      return null;
+    };
 
     on('queue:join', 'join', null, () => {
-      if (!isOpen()) return closed;
+      const refusal = matchingRefused();
+      if (refusal) return refusal;
       deliver(matchmaker.join(clientId));
       return ok;
     });
 
     on('session:next', 'next', nextSchema, ({ sessionId }) => {
-      if (!isOpen()) {
-        // Outside opening hours nobody new can be found. Still end the call the user
-        // asked to end, then tell them the site is closed.
+      const refusal = matchingRefused();
+      if (refusal) {
+        // Nobody new can be found for this client (closed, or in a cooldown). Still end
+        // the call the user asked to end, then say why there is no new one.
         if (matchmaker.getPartner(clientId, sessionId) !== null) {
           deliver(matchmaker.leave(clientId));
         }
-        return closed;
+        return refusal;
       }
       deliver(matchmaker.next(clientId, sessionId));
       return ok;
+    });
+
+    on('report', 'report', reportSchema, ({ sessionId, reason }) => {
+      const refusal = matchingRefused();
+      const result = matchmaker.report(clientId, sessionId, { requeue: refusal === null });
+      // Only someone the reporter was really matched with can be reported.
+      if (result.reportedId === null) return notInSession;
+      deliver(result.effects);
+
+      const outcome = reports.record(clientId, result.reportedId, now());
+      if (outcome.isNew) {
+        moderation.report({ reporter: clientId, reported: result.reportedId, sessionId, reason });
+      }
+      if (outcome.cooldownStartedUntil !== null) {
+        const until = outcome.cooldownStartedUntil;
+        // Take them out of whatever they are doing now, and tell their browser why.
+        deliver(matchmaker.leave(result.reportedId));
+        io.to(result.reportedId).emit('moderation:cooldown', { until });
+        moderation.cooldown({ client: result.reportedId, until });
+      }
+      // The reply is about the reporter's own next step: a report on a chat that had
+      // already ended changes nothing for them, so it always succeeds.
+      return result.endedCurrentSession ? (refusal ?? ok) : ok;
     });
 
     on('leave', 'leave', null, () => {

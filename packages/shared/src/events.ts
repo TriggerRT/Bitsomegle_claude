@@ -11,6 +11,7 @@ import { z } from 'zod';
 import {
   CHAT_MESSAGE_MAX_LENGTH,
   ICE_CANDIDATE_MAX_LENGTH,
+  REPORT_REASONS,
   SDP_MAX_LENGTH,
   SESSION_ID_MAX_LENGTH,
 } from './constants.ts';
@@ -39,6 +40,16 @@ export const mediaStateSchema = z.object({
   video: z.boolean(),
 });
 export type MediaStatePayload = z.infer<typeof mediaStateSchema>;
+
+/**
+ * `report`: "Report and skip". Names the chat the report is about: the current one, or
+ * the one that has just ended (so someone can still be reported after they left).
+ */
+export const reportSchema = z.object({
+  sessionId: sessionIdSchema,
+  reason: z.enum(REPORT_REASONS),
+});
+export type ReportPayload = z.infer<typeof reportSchema>;
 
 /** Same fields as the browser's RTCSessionDescriptionInit. */
 const descriptionSchema = z.object({
@@ -78,8 +89,9 @@ export type SessionEndReason = 'partner_next' | 'partner_left' | 'partner_discon
  * - rate_limited: too many requests too quickly
  * - closed: outside opening hours, so no new matches
  * - not_in_session: the message named a session the sender is not (or no longer) in
+ * - cooldown: several people reported the sender, who cannot be matched for a while
  */
-export type ErrorCode = 'invalid' | 'rate_limited' | 'closed' | 'not_in_session';
+export type ErrorCode = 'invalid' | 'rate_limited' | 'closed' | 'not_in_session' | 'cooldown';
 
 /**
  * The server's reply to a request. Socket.IO calls this an "acknowledgement" (ack):
@@ -138,6 +150,7 @@ export interface ClientToServerEvents {
   'session:next': (payload: NextPayload, ack: Ack) => void;
   leave: (ack: Ack) => void;
   'chat:send': (payload: ChatSendPayload, ack: Ack) => void;
+  report: (payload: ReportPayload, ack: Ack) => void;
   signal: (payload: SignalPayload) => void;
   'media:state': (payload: MediaStatePayload) => void;
 }
@@ -158,4 +171,9 @@ export interface ServerToClientEvents {
    * nothing; that is the normal case after a short drop.)
    */
   'connection:reset': () => void;
+  /**
+   * Sent to someone several people have reported. The server has already taken them out
+   * of any queue or chat, and refuses to match them until `until` (milliseconds since 1970).
+   */
+  'moderation:cooldown': (payload: { until: number }) => void;
 }

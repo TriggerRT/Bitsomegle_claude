@@ -3,6 +3,8 @@ import { type Logger, pino } from 'pino';
 import type { ServerConfig } from './config.ts';
 import { createHttpServer } from './http.ts';
 import { Matchmaker } from './matchmaking/Matchmaker.ts';
+import { createLogModerationSink, type ModerationSink } from './moderation/ModerationSink.ts';
+import { ReportTracker } from './moderation/ReportTracker.ts';
 import { getOpenStatus } from './schedule/openHours.ts';
 import { DEFAULT_RATE_LIMITS, type RateLimits } from './socket/rateLimit.ts';
 import {
@@ -17,6 +19,8 @@ export interface App {
   httpServer: HttpServer;
   io: SocketServer;
   matchmaker: Matchmaker;
+  /** Who reported whom lately, and who is in a cooldown. */
+  reports: ReportTracker;
   /** Supplies the STUN/TURN servers. Call `start()` on it before listening. */
   iceServers: IceServerSource;
   logger: Logger;
@@ -28,6 +32,8 @@ export interface App {
 export interface AppOverrides {
   now?: () => number;
   rateLimits?: RateLimits;
+  /** Where reports and cooldowns are recorded (the server log by default). */
+  moderation?: ModerationSink;
   /** How often the status is sent to every browser. */
   statusIntervalMs?: number;
   /** Stands in for the real internet when the server asks Cloudflare for TURN credentials. */
@@ -47,6 +53,8 @@ export function createApp(config: ServerConfig, overrides: AppOverrides = {}): A
   const httpServer = createHttpServer();
   const now = overrides.now ?? Date.now;
 
+  const reports = new ReportTracker();
+
   const iceServers = config.turn
     ? createCloudflareTurnSource({ ...config.turn, logger, now, fetch: overrides.fetch })
     : createStunOnlySource();
@@ -62,6 +70,8 @@ export function createApp(config: ServerConfig, overrides: AppOverrides = {}): A
     reconnectGraceMs: config.reconnectGraceMs,
     statusIntervalMs: overrides.statusIntervalMs ?? STATUS_INTERVAL_MS,
     getIceServers: iceServers.getIceServers,
+    reports,
+    moderation: overrides.moderation ?? createLogModerationSink(logger),
     logger,
     now,
   });
@@ -70,6 +80,7 @@ export function createApp(config: ServerConfig, overrides: AppOverrides = {}): A
     httpServer,
     io,
     matchmaker,
+    reports,
     iceServers,
     logger,
     close: () => {

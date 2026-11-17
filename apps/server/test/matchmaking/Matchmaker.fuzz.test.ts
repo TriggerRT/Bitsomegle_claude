@@ -44,6 +44,9 @@ const seen = {
   partner_disconnected: 0,
   staleNextIgnored: 0,
   avoidedPartner: 0,
+  reportedCurrentPartner: 0,
+  reportedAfterChatEnded: 0,
+  reportRefused: 0,
 };
 
 function runSequence(seed: number): void {
@@ -64,6 +67,16 @@ function runSequence(seed: number): void {
   /** Who was in each session, and which pairs must never meet again ('Report & skip'). */
   const sessionMembers = new Map<string, [string, string]>();
   const avoidedPairs = new Set<string>();
+  /** The chat each browser was in most recently and is no longer in. */
+  const endedSessionOf = new Map<string, string>();
+  /** What a browser does to its own picture of the world when its chat ends. */
+  const endChatFor = (id: string): void => {
+    const view = views.get(id);
+    if (!view) return;
+    if (view.sessionId !== null) endedSessionOf.set(id, view.sessionId);
+    view.state = 'idle';
+    view.sessionId = null;
+  };
   const pairKey = (a: string, b: string): string => [a, b].sort().join('+');
   const history: string[] = [];
   let clientCounter = 0;
@@ -102,8 +115,7 @@ function runSequence(seed: number): void {
           view.state === 'in_session' && view.sessionId === effect.sessionId,
           `${effect.to} told session ${effect.sessionId} ended but believes ${JSON.stringify(view)}`,
         );
-        view.state = 'idle';
-        view.sessionId = null;
+        endChatFor(effect.to);
         seen[effect.reason] += 1;
       }
     }
@@ -164,7 +176,7 @@ function runSequence(seed: number): void {
     } else if (roll < 0.45) {
       history.push(`join ${target}`);
       applyEffects(matchmaker.join(target));
-    } else if (roll < 0.8) {
+    } else if (roll < 0.7) {
       // Usually the session the browser believes it is in; sometimes an old or made-up one.
       const kind = random();
       const sessionId =
@@ -179,8 +191,7 @@ function runSequence(seed: number): void {
       const isStale = view?.state === 'in_session' && view.sessionId !== sessionId;
       // A real browser tears down its call as it sends Next for its current session.
       if (view && isCurrentSession) {
-        view.state = 'idle';
-        view.sessionId = null;
+        endChatFor(target);
         const members = sessionMembers.get(sessionId);
         if (avoidPartner && members) {
           avoidedPairs.add(pairKey(...members));
@@ -193,16 +204,62 @@ function runSequence(seed: number): void {
         seen.staleNextIgnored += 1;
       }
       applyEffects(effects);
+    } else if (roll < 0.8) {
+      // "Report and skip": the current chat, the one that just ended, or nonsense.
+      const kind = random();
+      const sessionId =
+        kind < 0.45 && view?.sessionId
+          ? view.sessionId
+          : kind < 0.8 && endedSessionOf.has(target)
+            ? (endedSessionOf.get(target) as string)
+            : kind < 0.9 && issuedSessionIds.length > 0
+              ? pick(issuedSessionIds)
+              : 'made-up';
+      const requeue = random() < 0.8;
+      history.push(`report ${target} ${sessionId}${requeue ? '' : ' (no requeue)'}`);
+      const isCurrentSession = view?.state === 'in_session' && view.sessionId === sessionId;
+      const isEndedSession = view !== undefined && endedSessionOf.get(target) === sessionId;
+      if (isCurrentSession) endChatFor(target);
+
+      const result = matchmaker.report(target, sessionId, { requeue });
+
+      check(
+        result.endedCurrentSession === Boolean(isCurrentSession),
+        `report by ${target}: endedCurrentSession is ${result.endedCurrentSession}`,
+      );
+      if (isCurrentSession || isEndedSession) {
+        const members = sessionMembers.get(sessionId);
+        const partner = members?.find((id) => id !== target);
+        check(
+          result.reportedId !== null && result.reportedId === partner,
+          `report by ${target} about ${sessionId} named ${result.reportedId}, expected ${partner}`,
+        );
+        if (result.reportedId !== null) avoidedPairs.add(pairKey(target, result.reportedId));
+        if (isCurrentSession) seen.reportedCurrentPartner += 1;
+        else seen.reportedAfterChatEnded += 1;
+      } else {
+        // Not this browser's chat: nobody may be reported and nothing may happen.
+        check(
+          result.reportedId === null && result.effects.length === 0,
+          `report by ${target} about someone else's session had an effect`,
+        );
+        seen.reportRefused += 1;
+      }
+      if (!requeue && isCurrentSession) {
+        check(
+          result.effects.every((effect) => effect.to !== target),
+          `report without requeue still sent ${target} somewhere`,
+        );
+      }
+      applyEffects(result.effects);
     } else if (roll < 0.92) {
       history.push(`leave ${target}`);
-      if (view) {
-        view.state = 'idle';
-        view.sessionId = null;
-      }
+      endChatFor(target);
       applyEffects(matchmaker.leave(target));
     } else {
       history.push(`disconnect ${target}`);
       views.delete(target);
+      endedSessionOf.delete(target);
       applyEffects(matchmaker.disconnect(target));
     }
 

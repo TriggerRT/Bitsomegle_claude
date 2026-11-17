@@ -27,3 +27,7 @@ export const ICE_CANDIDATE_MAX_LENGTH = 1000;
  * open across an update) ends its call on any drop, and the server must do the same.
  */
 export const RESUME_PROTOCOL = 2;
+
+/** Why someone is being reported. A fixed list: no free text is collected or stored. */
+export const REPORT_REASONS = ['inappropriate', 'harassment', 'spam', 'other'] as const;
+export type ReportReason = (typeof REPORT_REASONS)[number];

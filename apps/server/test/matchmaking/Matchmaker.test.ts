@@ -422,6 +422,120 @@ describe('Matchmaker', () => {
     });
   });
 
+  describe('report and skip', () => {
+    /** a and b are in session s1; c is connected and idle. */
+    function inChat(): Matchmaker {
+      const m = createMatchmaker('a', 'b', 'c');
+      m.join('a');
+      m.join('b');
+      return m;
+    }
+
+    it('ends the chat, tells the partner only that the reporter moved on, and requeues the reporter', () => {
+      const m = inChat();
+
+      const result = m.report('a', 's1', { requeue: true });
+      m.assertInvariants();
+
+      expect(result.reportedId).toBe('b');
+      expect(result.endedCurrentSession).toBe(true);
+      expect(result.effects).toEqual([
+        { type: 'session_ended', to: 'b', sessionId: 's1', reason: 'partner_next' },
+        { type: 'waiting', to: 'a' },
+      ]);
+      expect(m.getClient('a')).toEqual(WAITING);
+      expect(m.getClient('b')).toEqual(IDLE);
+    });
+
+    it('never pairs the two again, even when nobody else is available', () => {
+      const m = inChat();
+      m.report('a', 's1', { requeue: true });
+
+      // b looks again: a is the only one waiting, but must not be chosen.
+      expect(checked(m, m.join('b'))).toEqual([{ type: 'waiting', to: 'b' }]);
+      // A third person is matched with whoever has waited longest.
+      const effects = checked(m, m.join('c'));
+      expect(
+        effects
+          .filter((effect) => effect.type === 'matched')
+          .map((e) => e.to)
+          .sort(),
+      ).toEqual(['a', 'c']);
+      expect(m.getClient('b')).toEqual(WAITING);
+    });
+
+    it('without requeue it only ends the chat', () => {
+      const m = inChat();
+      const result = m.report('a', 's1', { requeue: false });
+      m.assertInvariants();
+
+      expect(result.effects).toEqual([
+        { type: 'session_ended', to: 'b', sessionId: 's1', reason: 'partner_next' },
+      ]);
+      expect(m.getClient('a')).toEqual(IDLE);
+    });
+
+    it('works for the chat that has just ended, after the other person left first', () => {
+      const m = inChat();
+      m.next('b', 's1'); // b skips a; b is now waiting, a is idle
+
+      const result = m.report('a', 's1', { requeue: true });
+      m.assertInvariants();
+
+      expect(result).toEqual({ reportedId: 'b', endedCurrentSession: false, effects: [] });
+      expect(m.getClient('a')).toEqual(IDLE); // reporting does not start a search
+      expect(m.getClient('b')).toEqual(WAITING);
+      // ...and they are not paired again.
+      expect(checked(m, m.join('a'))).toEqual([{ type: 'waiting', to: 'a' }]);
+    });
+
+    it('works for the last chat even while already in a new one, without disturbing it', () => {
+      const m = inChat();
+      m.next('a', 's1'); // a waiting, b idle
+      m.join('c'); // a + c in s2
+
+      const result = m.report('a', 's1', { requeue: true });
+      m.assertInvariants();
+
+      expect(result).toEqual({ reportedId: 'b', endedCurrentSession: false, effects: [] });
+      expect(m.getClient('a')).toEqual(inSession('s2'));
+      expect(m.getClient('c')).toEqual(inSession('s2'));
+    });
+
+    it('can still be made after the reported person has disconnected', () => {
+      const m = inChat();
+      m.disconnect('b');
+      expect(m.report('a', 's1', { requeue: true })).toMatchObject({ reportedId: 'b' });
+      m.assertInvariants();
+    });
+
+    it.each([
+      ['a session the client was never in', 'a', 's999'],
+      ['a session belonging to other people', 'c', 's1'],
+      ['a client that is not connected', 'ghost', 's1'],
+    ])('does nothing for %s', (_name, clientId, sessionId) => {
+      const m = inChat();
+      expect(m.report(clientId, sessionId, { requeue: true })).toEqual({
+        reportedId: null,
+        endedCurrentSession: false,
+        effects: [],
+      });
+      m.assertInvariants();
+      expect(m.getClient('a')).toEqual(inSession('s1'));
+      expect(m.getClient('b')).toEqual(inSession('s1'));
+    });
+
+    it('only the most recent ended chat can be reported, not older ones', () => {
+      const m = inChat();
+      m.next('a', 's1'); // a waiting
+      m.join('c'); // a + c in s2
+      m.next('a', 's2'); // s2 ended: it is now a's last chat
+
+      expect(m.report('a', 's1', { requeue: true }).reportedId).toBeNull();
+      expect(m.report('a', 's2', { requeue: true }).reportedId).toBe('c');
+    });
+  });
+
   describe('events from clients that are not connected', () => {
     it('are ignored', () => {
       const m = createMatchmaker('a');

@@ -2,7 +2,9 @@ export {
   APP_NAME,
   CHAT_MESSAGE_MAX_LENGTH,
   ICE_CANDIDATE_MAX_LENGTH,
+  REPORT_REASONS,
   RESUME_PROTOCOL,
+  type ReportReason,
   SDP_MAX_LENGTH,
   SESSION_ID_MAX_LENGTH,
 } from './constants.ts';
@@ -20,6 +22,8 @@ export {
   mediaStateSchema,
   type NextPayload,
   nextSchema,
+  type ReportPayload,
+  reportSchema,
   type ServerToClientEvents,
   type SessionEndedPayload,
   type SessionEndReason,

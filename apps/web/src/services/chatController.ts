@@ -1,4 +1,4 @@
-import type { AckResult } from '@bitsomeggle/shared';
+import type { AckResult, ReportReason } from '@bitsomeggle/shared';
 import {
   type ChatEvent,
   type ChatState,
@@ -108,6 +108,8 @@ export class ChatController {
       if (!recovered) this.dispatch({ type: 'session_lost' });
       this.resyncWithServer(recovered);
     });
+    // Several people reported us. The server has already taken us out of everything.
+    socket.on('moderation:cooldown', () => this.dispatch({ type: 'cooldown_started' }));
     // The server restored the connection but had already given up our place.
     socket.on('connection:reset', () => this.dispatch({ type: 'session_lost' }));
     socket.on('disconnect', (reason) => {
@@ -192,6 +194,26 @@ export class ChatController {
         ? socket.timeout(REQUEST_TIMEOUT_MS).emitWithAck('session:next', { sessionId })
         : socket.timeout(REQUEST_TIMEOUT_MS).emitWithAck('queue:join'),
     );
+  }
+
+  /**
+   * "Report and skip". During a chat it reports the partner and looks for someone new.
+   * After the partner has left, it reports them and stays on the same screen.
+   */
+  report(reason: ReportReason): void {
+    const { socket } = this.deps;
+    const { phase, sessionId, endedSessionId, reported } = this.state;
+    if (!socket.connected) return;
+
+    if (phase === 'in_session' && sessionId !== null) {
+      this.dispatch({ type: 'report_requested' });
+      this.requestMatch((s) =>
+        s.timeout(REQUEST_TIMEOUT_MS).emitWithAck('report', { sessionId, reason }),
+      );
+    } else if (phase === 'partner_left' && endedSessionId !== null && !reported) {
+      this.dispatch({ type: 'report_requested' });
+      socket.emit('report', { sessionId: endedSessionId, reason }, noReplyNeeded);
+    }
   }
 
   /** Leave, Cancel, or "Back" from the camera problem screen. */

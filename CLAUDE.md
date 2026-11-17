@@ -4,7 +4,7 @@ Anonymous 1:1 video chat with random matching and a Next button, for BITS Pilani
 The full product brief is in [docs/MASTER_PROMPT.md](docs/MASTER_PROMPT.md); read it before making architectural changes.
 
 ## Current phase
-M0 to M4 are done: tooling, matchmaking core, realtime server, web app with text chat, and peer-to-peer video and audio. **M5 is done:** the beta is live (web https://bitsomegle-claude.vercel.app, server https://bitsomeggle.onrender.com) with the Cloudflare TURN relay working. **M6 (reliability) is deployed:** reconnect grace, rejoin after a server restart, one ICE restart for a broken call, a video bitrate cap, a stats log line and a load-test tool. The live load test passed (300 people, free plan is enough, D-043). Manual tests M6-1 and M6-2 **failed** on real networks; the fix (D-042, `socket/resumeAdapter.ts`) is written and tested but must still be pushed, and then M6-1, M6-2, M6-3 and M6-5 done (`docs/MANUAL_TESTS.md`). After that: M7, safety and polish. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/TODO.md](docs/TODO.md).
+M0 to M4 are done: tooling, matchmaking core, realtime server, web app with text chat, and peer-to-peer video and audio. **M5 is done:** the beta is live (web https://bitsomegle-claude.vercel.app, server https://bitsomeggle.onrender.com) with the Cloudflare TURN relay working. **M6 (reliability) is deployed:** reconnect grace, rejoin after a server restart, one ICE restart for a broken call, a video bitrate cap, a stats log line and a load-test tool. The live load test passed (300 people, free plan is enough, D-043). Manual tests first found a real fault on real networks, fixed in D-042 (`socket/resumeAdapter.ts`); the user has since confirmed M6-1 to M6-4 and M6-6. Only M6-5 (server restart with people online) is still open. **M7 (safety and polish) is written and tested locally but not deployed:** Report and skip, a cooldown after several reports, rules and a people-here line on the landing page, a smaller web bundle. Still open: push and deploy, manual tests M7-1 to M7-7 (`docs/MANUAL_TESTS.md`), and the user's decision on an age statement. All planned milestones are then done. See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/TODO.md](docs/TODO.md).
 
 ## Stack (decided — see docs/DECISIONS.md for reasons)
 - **Web:** Vite + React + TypeScript SPA → Vercel (free).
@@ -49,6 +49,7 @@ Node ≥ 22.12 required (CI also tests Node 24, the production target).
 - `@bitsomeggle/shared` has a custom **`"source"` export condition** pointing at `src/index.ts`. Dev tools (editor/tsc, tsx `--conditions=source`, Vite, vitest) load the TypeScript source directly, so there's no rebuild after editing shared. Production (`node dist/…`) doesn't use that condition and loads `shared/dist`, which is why `build` builds shared first.
 - Each Node package has two tsconfigs: `tsconfig.json` (editor + typecheck, includes tests, emits nothing) and `tsconfig.build.json` (compiles `src/` to `dist/`).
 - A new test project must be added to `projects` in the root `vitest.config.ts`.
+- `packages/shared` is marked `"sideEffects": false` so the web bundle can drop the zod schemas it never uses. A module in `shared` must therefore only define things; code that must run when the file is imported would be silently removed from the web app.
 
 ## Testing the server
 - Integration tests (`apps/server/test/socket/*.integration.test.ts`) use `startTestServer()` and `TestClient` from `test/socket/helpers.ts`: a real server on a free port plus simulated browsers.
@@ -60,6 +61,8 @@ Node ≥ 22.12 required (CI also tests Node 24, the production target).
 - **A real network drop tells the server nothing.** Simulate it with `client.dropConnection({ unnoticed: true })` in server tests and with `network.drop()` in `e2e/reconnect.spec.ts` (its default). A drop where both ends close is the unusual case. The first M6 version passed every test and failed on real Wi-Fi for exactly this reason (D-042).
 - `socket/resumeAdapter.ts` uses Socket.IO internals (`pid`, `_onclose`). Rerun the reconnect tests after any Socket.IO upgrade.
 - The grace timer lives in `socket/socketServer.ts`, not in the Matchmaker: while it runs, matchmaking simply hasn't been told. Its callback calls the Matchmaker synchronously like any handler. Only clients in a call get a grace period (D-038).
+- **Reports** go through `Matchmaker.report()`, which checks the reporter was really matched with that person. The reported person must never be told (they get an ordinary `partner_next`), and reasons come from the fixed list `REPORT_REASONS`: never add free text, it would be content we may not log.
+- To check what was recorded, pass a spy as `moderation` in `startTestServer({}, { moderation })`; `server.app.reports` is the tracker.
 - Socket.IO can restore a connection only if it remembers the last message that browser received. The 15-second `status` broadcast guarantees that; don't remove it or make it conditional (D-038).
 
 ## Deployment
@@ -80,6 +83,7 @@ Node ≥ 22.12 required (CI also tests Node 24, the production target).
 - Call behaviour that can't be produced on demand in a browser (a call failing) is unit-tested in `services/peer.test.ts` with a stand-in `RTCPeerConnection`. To cut a page's server connection in a browser test, see `openPersonWithNetwork` in `e2e/reconnect.spec.ts`.
 - Server events can arrive late. The reducer must ignore `waiting`/`matched` unless the user is waiting or in a chat, and ignore `session_ended`/messages for any session but the current one.
 - If the server refuses Start or Next, go idle AND send `leave` (DECISIONS D-026).
+- The browser tests start two servers: the normal one, and a closed, one-visitor-only one for `e2e/closed.spec.ts` (`playwright.config.ts`).
 - Unit tests: `src/**/*.test.ts` (vitest). Browser tests: `e2e/*.spec.ts` (Playwright); find elements by role and visible text, as a user would.
 - Styling is plain CSS in `src/styles.css` (D-027).
 

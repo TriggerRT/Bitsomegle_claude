@@ -1,9 +1,11 @@
 import type { SessionEndReason } from '@bitsomeggle/shared';
+import { useState } from 'react';
 import type { Chat } from '../hooks/useChat.ts';
 import type { ChatState } from '../state/chatMachine.ts';
 import { ChatPanel } from './ChatPanel.tsx';
 import { MediaControls } from './MediaControls.tsx';
 import { ReconnectingBanner } from './ReconnectingBanner.tsx';
+import { ReportDialog } from './ReportDialog.tsx';
 import { VideoTile } from './VideoTile.tsx';
 
 const END_TEXT: Record<SessionEndReason, string> = {
@@ -16,7 +18,8 @@ const END_TEXT: Record<SessionEndReason, string> = {
 function remoteNotice(state: ChatState): string | null {
   if (state.phase !== 'in_session') {
     const reason = state.endReason ? END_TEXT[state.endReason] : 'The chat ended.';
-    return `${reason} Press Next to meet someone new.`;
+    const thanks = state.reported ? ' Report sent, thank you.' : '';
+    return `${reason}${thanks} Press Next to meet someone new.`;
   }
   if (state.call === 'failed') {
     return "Couldn't connect video. You can still chat by text, or press Next.";
@@ -35,6 +38,12 @@ export function Conversation({ chat }: ConversationProps) {
   const { state } = chat;
   const active = state.phase === 'in_session';
   const notice = remoteNotice(state);
+  const [reportOpen, setReportOpen] = useState(false);
+  // The person on screen can be reported during the chat and after they have left.
+  const canReport =
+    state.connection === 'connected' &&
+    !state.reported &&
+    (active || state.endedSessionId !== null);
 
   return (
     <main className="screen conversation">
@@ -55,6 +64,14 @@ export function Conversation({ chat }: ConversationProps) {
           )}
           {active && !state.partnerMedia.audio && <p className="badge">Stranger is muted</p>}
           <ReconnectingBanner state={state} />
+          <button
+            type="button"
+            className="report-button"
+            onClick={() => setReportOpen(true)}
+            disabled={!canReport}
+          >
+            {state.reported ? 'Reported' : 'Report'}
+          </button>
 
           <div className="self-view">
             <VideoTile stream={chat.localStream} isSelf label="Your video" testId="local-video" />
@@ -81,6 +98,15 @@ export function Conversation({ chat }: ConversationProps) {
           </div>
         </div>
       </section>
+
+      <ReportDialog
+        open={reportOpen}
+        onCancel={() => setReportOpen(false)}
+        onReport={(reason) => {
+          setReportOpen(false);
+          chat.report(reason);
+        }}
+      />
 
       <ChatPanel
         messages={state.messages}

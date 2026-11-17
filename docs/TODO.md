@@ -75,7 +75,7 @@ Milestones in order. Each one ends **tested** and with the docs updated. Details
 - [x] M5-7 to M5-10 confirmed by user (2026-11-16): campus Wi-Fi through the relay, other browsers, a real second person, sleep and wake
 - [ ] Later: choose opening hours; set `OPEN_WINDOWS`, the wake-up time and `SERVER_URL` (DEPLOYMENT part 6)
 
-## M6 — Reliability hardening · deployed (2026-11-16) · one fix waiting to be deployed, then manual tests
+## M6 — Reliability hardening · deployed ✅ (2026-11-16) · one manual test left (M6-5)
 - [x] Reconnect grace: a call survives a short drop of the server connection (D-038)
 - [x] Server-restart behaviour: waiting people rejoin by themselves; a lost call is explained on the start page
 - [x] One ICE restart when a call fails or stays interrupted (D-039)
@@ -86,27 +86,30 @@ Milestones in order. Each one ends **tested** and with the docs updated. Details
 - [x] Load test against the live server (M6-6): 300 pretend users, no failures → the free plan is enough (D-043)
 - [x] M6-4 closing the tab: confirmed by user
 - [x] M6-1 and M6-2 **failed** on the live site → cause found and fixed: the server had not noticed the drop (D-042)
-- [ ] Commit and push the fix; CI green; Render redeploys
-- [ ] **Needs manual test (again):** M6-1 Wi-Fi blip, M6-2 Wi-Fi to mobile data
-- [ ] **Needs manual test:** M6-3 long drop, M6-5 server restart
+- [x] Fix committed, pushed and deployed
+- [x] M6-1 Wi-Fi blip, M6-2 Wi-Fi to mobile data, M6-3 long drop: confirmed by user after the fix (2026-11-16)
+- [ ] **Needs manual test:** M6-5 server restart with people online (user will do it later)
 - [x] Stats lines from Render's log during the load test: p99 delay 1 to 2 ms, memory up to 123 MB (D-043)
 - [ ] Deferred: stop handing out TURN credentials automatically near 1,000 GB a month. Needs a read-only Cloudflare analytics token. Do it when monthly relay use passes about 200 GB or before a campus-wide announcement (D-040)
 
-## M7 — Safety + UX polish
-- [ ] Report & skip, avoid list, temporary cooldown after multiple distinct reports
-- [ ] `ModerationSink` structured events
-- [ ] Community guidelines notice on landing page
-- [ ] "N people online" indicator, with the count updating live (today `status` is sent once on connect)
-- [ ] Add the `report` event to the contract
-- [ ] Mobile layout (chat as bottom sheet), keyboard accessibility, clear error copy
-- [ ] Browser tests for the closed-hours and server-full screens
-- [ ] Keep zod out of the web bundle (import only types and constants from `shared`)
-- [ ] **Needs manual test:** full UX checklist on mobile and desktop
+## M7 — Safety + UX polish · code ✅ (2026-11-16) · deployment and manual tests pending
+- [x] Report and skip, avoid list, cooldown after three different reporters (D-044, D-045)
+- [x] `ModerationSink` structured events in the server log
+- [x] `report` and `moderation:cooldown` added to the contract
+- [x] Rules on the landing page
+- [x] "N people here right now", refreshed every 15 s; "nobody else is online" on the waiting screen
+- [x] Browser tests for the closed-hours and server-full screens
+- [x] Validation library kept out of the web bundle (111 KB → 89 KB compressed)
+- [x] Accessibility: report dialog keeps focus, closes on Escape, returns focus; decided against a bottom-sheet chat (D-046)
+- [ ] Commit and push M7; CI green; Render and Vercel redeploy
+- [ ] **Needs manual test:** M7-1 to M7-7
+- [ ] **You decide:** should the landing page state an age limit ("18+")? (D-046)
+- [ ] After launch: watch the `moderation: report` lines in Render's log. If reports are frequent, plan the BITS email sign-in (D-045)
 
 ## Open questions (don't block M0)
 - [ ] Exact daily opening window(s) and days (`OPEN_WINDOWS` supports times today; specific weekdays would need a small addition)
 - [ ] Tune rate-limit numbers after the beta (ARCHITECTURE §3.7)
-- [ ] Avoid-list and cooldown thresholds
+- [x] Avoid-list and cooldown thresholds: 3 different reporters in 15 minutes → 10 minutes (first guess, D-045)
 - [ ] Landing page wording: 18+ notice vs "for BITS students"
 - [ ] Auto-re-queue after partner leaves? (current default: no, D-014)
 - [ ] Cooldown before the same two people can be re-paired? (current: immediate if nobody else is waiting, D-020)

@@ -222,7 +222,7 @@ first. Use two devices where it says so; a phone and a laptop are ideal.
 Automated tests cut the connection in a simulated way. Only these tests show what real
 Wi-Fi and mobile networks do.
 
-### M6-1 A short Wi-Fi blip — _Failed (2026-11-16); fixed, needs manual test again after the fix is deployed_
+### M6-1 A short Wi-Fi blip — _Confirmed (2026-11-16, second try, after the fix in D-042)_
 > First try: the banner appeared, then the start page with "Your connection dropped, so
 > the chat ended." Cause: the server had not noticed the drop (DECISIONS D-042).
 1. Start a call between a laptop and a phone.
@@ -236,7 +236,7 @@ On the phone: the picture freezes and then recovers. It must **not** say "Strang
 disconnected."
 Report: roughly how many seconds until video was back, and what each screen showed.
 
-### M6-2 Phone switches from Wi-Fi to mobile data — _Failed (2026-11-16); fixed, needs manual test again after the fix is deployed_
+### M6-2 Phone switches from Wi-Fi to mobile data — _Confirmed (2026-11-16, second try, after the fix in D-042)_
 > First try: same result and same cause as M6-1.
 1. Start a call with the phone on Wi-Fi (mobile data also enabled).
 2. On the phone, switch Wi-Fi off, so it falls back to mobile data.
@@ -244,7 +244,7 @@ Report: roughly how many seconds until video was back, and what each screen show
 You should see: as M6-1. The call continues over mobile data in the same chat.
 Report: seconds until video was back; phone model and browser.
 
-### M6-3 A long drop — _Needs manual test_
+### M6-3 A long drop — _Confirmed (2026-11-16)_
 1. Start a call between two devices.
 2. On one of them switch Wi-Fi off and leave it off for **30 seconds**. Then switch it on.
 
@@ -285,3 +285,81 @@ time when nobody is expected.
 You should see: "users connected 300 of 300", no refused or unanswered requests, and
 answer times under about 300 ms at p95. In the log, `loopDelayP99Ms` under about 100.
 Report: the two tables the tool prints, and the stats lines from the log.
+
+---
+
+## M7 — Reporting, the landing page and phone use
+
+Do these on the live site **after M7 has been pushed and Render shows the new version as
+Live**. Reload the page on every device first.
+
+### M7-1 Report and skip — _Needs manual test_
+1. Start a call between two devices (A and B).
+2. On A, press **Report** (top right of the other person's video). Choose any reason.
+
+You should see, on A: "Looking for someone…" and "Thanks, your report was noted. You won't
+be matched with that person again."
+On B: "Stranger moved on. Press Next to meet someone new." Nothing on B may mention a report.
+3. On B press **Next**.
+
+You should see: both A and B stay on "Looking for someone…" and are **not** matched with
+each other, although they are the only two people waiting.
+4. Press Cancel on both to finish.
+
+### M7-2 Reporting someone who left first — _Needs manual test_
+1. Start a call between A and B. On B press **Next**.
+2. On A (which shows "Stranger moved on.") press **Report** and choose a reason.
+
+You should see, on A: "Stranger moved on. Report sent, thank you." and the button now
+says **Reported** and cannot be pressed again.
+
+### M7-3 The report dialog on a phone and with a keyboard — _Needs manual test_
+1. On a phone, during a call, press **Report**.
+
+You should see: a box in the middle of the screen with four reasons and Cancel, all easy
+to tap, nothing cut off. Tapping **Cancel** closes it and the call continues.
+2. On a laptop, during a call, press **Report**, then press the **Escape** key.
+
+You should see: the box closes and the call continues. Pressing **Tab** moves through the
+buttons inside the box and never to the page behind it.
+
+### M7-4 Three reports block someone for a while — _Needs manual test_
+You need four browser windows (for example two normal and two private windows on two
+devices). Call one of them the offender.
+1. Start a call between the offender and window 1. In window 1, **Report**, then **Cancel**.
+2. On the offender press **Next**. Start in window 2, **Report** from window 2, **Cancel**.
+3. On the offender press **Next**. Start in window 3, **Report** from window 3.
+
+You should see, on the offender, right after the third report: the start page with
+"Several people reported you, so you can't start a chat for a few minutes." and the camera
+light off. Pressing **Start chatting** shows the same message again.
+4. Reload the offender's page and press Start.
+
+You should see: it works again. This is the known limit: without accounts, a reload
+clears the block (DECISIONS D-045).
+
+### M7-5 The landing page — _Needs manual test_
+1. Open the site on a phone and on a laptop.
+
+You should see: the Start button, a line saying how many people are here, and four short
+rules under "Before you start". On the phone everything is readable without zooming, and
+the Start button is visible without scrolling.
+2. With the laptop page open, open the site on the phone too and wait up to 15 seconds.
+
+You should see: the laptop's line change from "You're the only one here right now." to
+"2 people here right now".
+Report: is the wording of the rules what you want? Should it mention an age limit?
+
+### M7-6 Typing on a phone — _Needs manual test_
+1. On a phone, during a call, tap the message box so the on-screen keyboard opens.
+2. Type a message and send it.
+
+You should see: the message box stays visible above the keyboard while you type, and the
+sent message appears in the list.
+Report: phone model and browser, and whether the box was hidden by the keyboard.
+
+### M7-7 Waiting alone — _Needs manual test_
+1. Make sure no other window is open. Press **Start chatting**.
+
+You should see: "Looking for someone…" and "Nobody else is online right now. Stay here and
+you'll be matched when someone arrives."

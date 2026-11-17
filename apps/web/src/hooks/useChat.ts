@@ -1,3 +1,4 @@
+import type { ReportReason } from '@bitsomeggle/shared';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChatController, type ChatSnapshot, INITIAL_SNAPSHOT } from '../services/chatController.ts';
 import { acquireLocalMedia, stopMedia } from '../services/localMedia.ts';
@@ -8,6 +9,7 @@ export interface ChatActions {
   start: () => void;
   next: () => void;
   leave: () => void;
+  report: (reason: ReportReason) => void;
   sendMessage: (text: string) => void;
   toggleMic: () => void;
   toggleCamera: () => void;
@@ -65,6 +67,7 @@ export function useChat(serverUrl: string): Chat {
       start: () => controllerRef.current?.start(),
       next: () => controllerRef.current?.next(),
       leave: () => controllerRef.current?.leave(),
+      report: (reason) => controllerRef.current?.report(reason),
       sendMessage: (text) => controllerRef.current?.sendMessage(text),
       toggleMic: () => controllerRef.current?.toggleMic(),
       toggleCamera: () => controllerRef.current?.toggleCamera(),

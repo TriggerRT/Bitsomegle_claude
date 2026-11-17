@@ -91,6 +91,8 @@ export interface ChatState {
   hasCamera: boolean;
   /** What the user has switched on. Remembered across partners. */
   localMedia: MediaFlags;
+  /** True from "Report and skip" until the next partner, so the waiting screen can say thanks. */
+  thanksForReport: boolean;
 
   // ---- Everything below describes ONE conversation and is reset when it is over ----
 
@@ -102,6 +104,10 @@ export interface ChatState {
   messages: ChatMessage[];
   /** Why the last session ended, while phase is partner_left. */
   endReason: SessionEndReason | null;
+  /** While phase is partner_left: the chat that just ended, which can still be reported. */
+  endedSessionId: string | null;
+  /** True once the person on screen has been reported. */
+  reported: boolean;
   /** What the partner has switched on, as they last told us. */
   partnerMedia: MediaFlags;
   call: CallState;
@@ -113,12 +119,16 @@ export type ChatEvent =
   | { type: 'connection_lost' }
   /** The server no longer has the chat we think we are in (too long away, or restarted). */
   | { type: 'session_lost' }
+  /** Several people reported us: the server took us out of everything for a while. */
+  | { type: 'cooldown_started' }
   | { type: 'server_full' }
   | { type: 'status'; status: StatusPayload }
   // User actions
   | { type: 'start_requested' }
   | { type: 'next_requested' }
   | { type: 'leave_requested' }
+  /** "Report and skip", after the user picked a reason. */
+  | { type: 'report_requested' }
   | { type: 'notice_dismissed' }
   | { type: 'mic_toggled' }
   | { type: 'camera_toggled' }
@@ -145,6 +155,8 @@ const NO_SESSION = {
   iceServers: [],
   messages: [],
   endReason: null,
+  endedSessionId: null,
+  reported: false,
   partnerMedia: { audio: true, video: true },
   call: 'connecting',
 } satisfies Partial<ChatState>;
@@ -157,6 +169,7 @@ export const initialChatState: ChatState = {
   mediaError: null,
   hasCamera: true,
   localMedia: { audio: true, video: true },
+  thanksForReport: false,
   ...NO_SESSION,
 };
 
@@ -193,8 +206,26 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
       if (state.phase !== 'in_session') return state;
       return { ...state, ...NO_SESSION, phase: 'idle', notice: 'connection_lost' };
 
+    case 'cooldown_started':
+      // Wherever we were, the server has already removed us. Back to the start page.
+      return {
+        ...state,
+        ...NO_SESSION,
+        phase: 'idle',
+        notice: 'cooldown',
+        mediaError: null,
+        thanksForReport: false,
+      };
+
     case 'server_full':
-      return { ...state, ...NO_SESSION, connection: 'full', phase: 'idle', mediaError: null };
+      return {
+        ...state,
+        ...NO_SESSION,
+        connection: 'full',
+        phase: 'idle',
+        mediaError: null,
+        thanksForReport: false,
+      };
 
     case 'status':
       return { ...state, status: event.status };
@@ -223,10 +254,21 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
 
     case 'next_requested':
       if (state.phase !== 'in_session' && state.phase !== 'partner_left') return state;
-      return { ...state, ...NO_SESSION, phase: 'waiting', notice: null };
+      return { ...state, ...NO_SESSION, phase: 'waiting', notice: null, thanksForReport: false };
+
+    case 'report_requested':
+      // During a chat this is "Report and skip": straight on to looking for someone new.
+      if (state.phase === 'in_session') {
+        return { ...state, ...NO_SESSION, phase: 'waiting', notice: null, thanksForReport: true };
+      }
+      // After the other person left, the old chat stays on screen, marked as reported.
+      if (state.phase === 'partner_left' && state.endedSessionId !== null && !state.reported) {
+        return { ...state, reported: true };
+      }
+      return state;
 
     case 'leave_requested':
-      return { ...state, ...NO_SESSION, phase: 'idle', mediaError: null };
+      return { ...state, ...NO_SESSION, phase: 'idle', mediaError: null, thanksForReport: false };
 
     case 'notice_dismissed':
       return { ...state, notice: null };
@@ -240,7 +282,13 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
 
     case 'request_refused':
       // The server said no to Start or Next (closed, too fast, or no reply).
-      return { ...state, ...NO_SESSION, phase: 'idle', notice: event.reason };
+      return {
+        ...state,
+        ...NO_SESSION,
+        phase: 'idle',
+        notice: event.reason,
+        thanksForReport: false,
+      };
 
     case 'waiting':
       if (!wantsChat) return state;
@@ -255,12 +303,19 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
         sessionId: event.sessionId,
         polite: event.polite,
         iceServers: event.iceServers,
+        thanksForReport: false,
       };
 
     case 'session_ended':
       if (!isCurrentSession(event.sessionId)) return state;
       // Keep the messages on screen so the user can still read them.
-      return { ...state, phase: 'partner_left', sessionId: null, endReason: event.reason };
+      return {
+        ...state,
+        phase: 'partner_left',
+        sessionId: null,
+        endReason: event.reason,
+        endedSessionId: event.sessionId,
+      };
 
     case 'message_sent':
       if (state.phase !== 'in_session') return state;

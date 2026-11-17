@@ -27,6 +27,7 @@ export const GENEROUS_RATE_LIMITS: RateLimits = {
   chat: { burst: 10_000, perSecond: 10_000 },
   signal: { burst: 10_000, perSecond: 10_000 },
   media: { burst: 10_000, perSecond: 10_000 },
+  report: { burst: 10_000, perSecond: 10_000 },
   strike: DEFAULT_RATE_LIMITS.strike,
 };
 

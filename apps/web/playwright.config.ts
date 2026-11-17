@@ -11,6 +11,21 @@ const SERVER_PORT = 3101;
 const WEB_PORT = 5273;
 const WEB_URL = `http://localhost:${WEB_PORT}`;
 
+/**
+ * A second, deliberately awkward server for e2e/closed.spec.ts: it is closed right now
+ * and accepts only one visitor. The web app is told its server address when it is built,
+ * so that server gets its own copy of the web app too.
+ */
+const SPECIAL_SERVER_PORT = 3102;
+const SPECIAL_WEB_PORT = 5274;
+const SPECIAL_WEB_URL = `http://localhost:${SPECIAL_WEB_PORT}`;
+/** A half-hour opening window that starts about six hours from now, in Indian time. */
+function windowOpeningLater(): string {
+  const indianHour = new Date(Date.now() + 5.5 * 3_600_000).getUTCHours();
+  const opens = String((indianHour + 6) % 24).padStart(2, '0');
+  return `${opens}:00-${opens}:30`;
+}
+
 export default defineConfig({
   testDir: './e2e',
   // The tests share one server and one matchmaking queue, so they must not overlap.
@@ -55,6 +70,25 @@ export default defineConfig({
       url: WEB_URL,
       reuseExistingServer: false,
       env: { VITE_SERVER_URL: `http://localhost:${SERVER_PORT}` },
+    },
+    {
+      command: 'npx tsx --conditions=source src/index.ts',
+      cwd: '../server',
+      url: `http://localhost:${SPECIAL_SERVER_PORT}/health`,
+      reuseExistingServer: false,
+      env: {
+        PORT: String(SPECIAL_SERVER_PORT),
+        CORS_ORIGIN: SPECIAL_WEB_URL,
+        OPEN_WINDOWS: windowOpeningLater(),
+        MAX_CLIENTS: '1',
+        LOG_LEVEL: 'warn',
+      },
+    },
+    {
+      command: `npx vite --port ${SPECIAL_WEB_PORT} --strictPort`,
+      url: SPECIAL_WEB_URL,
+      reuseExistingServer: false,
+      env: { VITE_SERVER_URL: `http://localhost:${SPECIAL_SERVER_PORT}` },
     },
   ],
 });

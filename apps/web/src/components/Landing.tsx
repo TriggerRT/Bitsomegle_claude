@@ -10,6 +10,8 @@ const NOTICE_TEXT: Record<Notice, string> = {
   not_in_session: 'Something went wrong. Please try again.',
   timeout: 'The server did not answer. Please try again.',
   connection_lost: 'Your connection dropped, so the chat ended.',
+  cooldown:
+    "Several people reported you, so you can't start a chat for a few minutes. Please keep to the rules below.",
 };
 
 interface LandingProps {
@@ -24,6 +26,7 @@ export function Landing({ state, onStart, onDismissNotice, onRetryConnection }: 
   const { connection, status, notice } = state;
   const open = isOpenAt(status, now);
   const canStart = connection === 'connected' && open;
+  const online = connection === 'connected' && status ? status.online : null;
 
   return (
     <main className="screen landing">
@@ -65,6 +68,25 @@ export function Landing({ state, onStart, onDismissNotice, onRetryConnection }: 
           <>Open for another {formatCountdown(status.closesAt - now)}.</>
         )}
       </p>
+
+      {online !== null && (
+        <p className="online">
+          {online <= 1 ? "You're the only one here right now." : `${online} people here right now`}
+        </p>
+      )}
+
+      <section className="guidelines" aria-labelledby="guidelines-title">
+        <h2 id="guidelines-title">Before you start</h2>
+        <ul>
+          <li>Be respectful. No nudity, harassment or hate.</li>
+          <li>Don't share personal details such as your phone number or room number.</li>
+          <li>
+            Anyone can report you. If several people do, you are blocked from chatting for a while.
+          </li>
+          <li>Bitsomeggle records nothing, but the other person could record their own screen.</li>
+        </ul>
+        <p>By pressing Start you agree to follow these rules.</p>
+      </section>
     </main>
   );
 }

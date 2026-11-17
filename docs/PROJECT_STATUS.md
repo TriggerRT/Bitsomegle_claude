@@ -1,18 +1,20 @@
 # Bitsomeggle — Project Status
 
-_Last updated: 2026-11-16 (M6 deployed; a fix for real network drops is written but not deployed)_
+_Last updated: 2026-11-16 (M7 code done; not deployed, manual tests pending)_
 
 ## Phase
 **M5 is complete:** the beta is online at https://bitsomegle-claude.vercel.app with the relay working, and all ten M5 manual tests are confirmed.
 
-**M6 (reliability) is deployed, and manual testing found a real fault:** a call did not survive a real Wi-Fi drop (M6-1, M6-2). The cause is found and fixed (D-042), with tests that reproduce it, but **the fix is not committed or deployed yet**, so the live site still has the fault. The load test against the live server passed: the free plan is enough for 300 people (D-043). Still open: deploy the fix, then repeat M6-1 and M6-2, and do M6-3 and M6-5 ([MANUAL_TESTS.md](MANUAL_TESTS.md)). See [TODO.md](TODO.md).
+**M6 (reliability) is deployed and nearly complete.** Manual testing found a real fault (a call did not survive a real Wi-Fi drop); it was fixed (D-042), deployed, and the user confirmed M6-1, M6-2 and M6-3 on real networks afterwards. M6-4 and the live load test (M6-6) are confirmed too: the free plan is enough for 300 people (D-043). **One test is left: M6-5, a server restart with people online** ([MANUAL_TESTS.md](MANUAL_TESTS.md)). 
+
+**M7 (safety and polish): the code is written and tested locally, but not committed, pushed or deployed.** Report and skip, a cooldown after several reports, rules and a people-here line on the landing page, a smaller web bundle, and browser tests for the closed and full screens. Still open: deploy, then manual tests M7-1 to M7-7 ([MANUAL_TESTS.md](MANUAL_TESTS.md)), and one decision for you: whether the landing page should state an age limit ([TODO.md](TODO.md)).
 
 ## What exists
 | Item | Status |
 |---|---|
 | Product brief ([MASTER_PROMPT.md](MASTER_PROMPT.md)) | Done |
 | Architecture ([ARCHITECTURE.md](ARCHITECTURE.md)) | Server (§3, §4) and web app (§5) implemented |
-| Decision log ([DECISIONS.md](DECISIONS.md)) | D-001 … D-043 |
+| Decision log ([DECISIONS.md](DECISIONS.md)) | D-001 … D-046 |
 | `CLAUDE.md` (repo root) | Done |
 | Git repository | Branch `main`, pushed to private GitHub repo `TriggerRT/Bitsomegle_claude` |
 | npm workspaces: `packages/shared`, `apps/server`, `apps/web` | Implemented, tested |
@@ -34,12 +36,15 @@ _Last updated: 2026-11-16 (M6 deployed; a fix for real network drops is written 
 | TURN relay credentials from Cloudflare (`apps/server/src/turn/`) | Implemented, tested with a stand-in for Cloudflare. With the real key on Render: credentials fetched, and a relay-only call connected (M5-3, confirmed by user 2026-11-14) |
 | Per-IP connection cap (`apps/server/src/socket/ipLimit.ts`) | Implemented, tested. Render does send `true-client-ip` (seen in the live log, M5-4). The cap itself has not been reached on the live server |
 | Relay test switch (`?relay=1`) | Implemented, tested |
-| Reconnect grace: a call survives a short drop of the server connection (D-038, D-042) | Implemented, tested with drops the server is not told about (pretend browsers and real browser windows). The first version **failed on a real network** (M6-1, M6-2); the fix **needs manual test** after deployment |
-| Rejoin after a server restart or long drop; "Reconnecting…" banner | Implemented, tested |
-| Rescue of a broken video call: one ICE restart (D-039) | Implemented, tested against a stand-in for the browser's call object. **Needs manual test**: never seen on a real broken call |
+| Reconnect grace: a call survives a short drop of the server connection (D-038, D-042) | Implemented, tested with drops the server is not told about (pretend browsers and real browser windows). The first version failed on a real network; after the fix the user confirmed M6-1, M6-2 and M6-3 on the live site (2026-11-16) |
+| Rejoin after a server restart or long drop; "Reconnecting…" banner | Implemented, tested. Long drop confirmed by user (M6-3). A real server restart with people online: **needs manual test** (M6-5) |
+| Rescue of a broken video call: one ICE restart (D-039) | Implemented, tested against a stand-in for the browser's call object. In M6-1 and M6-2 video came back on real networks; whether the rescue or the browser's own recovery did it was not observed |
 | Video bitrate cap, 600 kbit/s (D-040) | Implemented, tested in Chromium |
 | Stats log line once a minute (D-041) | Implemented, tested; seen in a local run |
 | Load-test tool (`npm run loadtest`) | Implemented; run locally and against the live server with 300 users (D-043) |
+| Report and skip, avoid list, cooldown after three different reporters (D-044, D-045) | Implemented, tested (matchmaker, server with pretend browsers, real browser windows). **Needs manual test** |
+| Landing page rules and "people here right now" | Implemented, tested in browser windows; looked at on desktop and phone-size screens |
+| Report dialog | Implemented, tested (button, Escape, focus returns). **Needs manual test** with a real phone and keyboard |
 | Deployment files: `render.yaml`, `apps/web/vercel.json`, `.github/workflows/wake-server.yml` | Implemented. Render and Vercel both built and deployed from them (2026-11-14). The wake-up job is still inactive and **untested** |
 | Deployment guide ([DEPLOYMENT.md](DEPLOYMENT.md)) | Followed by the user on real accounts (2026-11-14). Corrected where reality differed: Cloudflare asks for a card, and Vercel needed a different install command |
 
@@ -53,12 +58,12 @@ Status words: Implemented / Tested / Partially tested / Untested / Needs manual 
 | Text chat | Tested end to end (M3) |
 | Video/audio (WebRTC P2P) | Tested end to end with a pretend camera (M4) and confirmed by the user with a real camera on one laptop. Between different networks: **needs manual test** after deployment |
 | Next button | Tested end to end, no page reload (M3) |
-| Waiting / matched / partner-left states | Tested end to end (M3). Closed-hours and server-full screens: logic unit-tested, **not yet seen in a browser** |
+| Waiting / matched / partner-left states | Tested end to end (M3). Closed-hours and server-full screens: tested in browser windows against a closed, nearly full test server (M7) |
 | TURN relay | Working on the live site: relay-only calls connected, including from campus Wi-Fi (M5-3, M5-7, confirmed by user) |
-| Opening-hours window | Server: tested. Countdown UI: implemented, logic unit-tested, not exercised in a browser test |
+| Opening-hours window | Server: tested. Countdown UI: tested in a browser window (M7). **Not tried on the live site**, where no opening hours are set |
 | Rate limiting | Tested (M2). Numbers to be tuned after beta |
-| Surviving connection drops | Failed on real networks in the first M6 version; fixed and tested with realistic simulated drops. **Needs manual test** again (M6-1 to M6-3) |
-| Report & skip / moderation hooks | Not started |
+| Surviving connection drops | Confirmed by the user on real networks after the fix: Wi-Fi blip, Wi-Fi to mobile data, long drop (M6-1 to M6-3) |
+| Report & skip / moderation hooks | Tested end to end in browser windows (M7). **Needs manual test** on real devices |
 | Deployment | Live since 2026-11-14. Laptop, phone ↔ laptop and two-network calls confirmed by the user (M5-2, M5-5, M5-6) |
 
 ## Test evidence (M1)
@@ -67,6 +72,27 @@ Status words: Implemented / Tested / Partially tested / Untested / Needs manual 
 - Randomized test: 2,000 seeded sequences × 150 operations (300,000 operations). After each one it checks the invariants and that a simulated browser, updated only from effects, agrees with the server.
 - Bug-injection check: 9 deliberate bugs were added one at a time (stale guard removed, partner left in queue, half-ended session, duplicate join, ghost left in queue, two impolite peers, avoid list ignored, fallback removed, client not deleted). The tests failed for all 9. The original code was then restored.
 - Coverage of `matchmaking/`: every line of real logic runs in tests. The only lines not run are the "this should never happen" alarms.
+
+## Test evidence (M7)
+- `npm run check` passes: lint, typecheck, **477 tests**. `npm run e2e`: **33 browser tests** pass. `npm run build` succeeds.
+- New in M7:
+  - Matchmaker: report ends the chat like a skip and never pairs the two again, even when nobody else is waiting; works for the chat that just ended and while already in a new one; refuses sessions that are not the reporter's. The randomized test now mixes reports into its 300,000 steps and checks that reported pairs never meet again.
+  - Report tracker: three different reporters start a cooldown; one person repeating counts once; old reports expire; the cooldown ends by itself and is not extended by more reports; records of people who left are forgotten.
+  - Server with pretend browsers: the reported person is told nothing about the report; reports are recorded once with ids and the reason only; refused reports record nothing; reports are rate limited; the cooldown removes the offender from a chat they had moved on to and refuses Start and Next for ten minutes.
+  - Web app logic: report during a chat and after the partner left; the thank-you; the cooldown path releases the camera.
+  - Real browser windows: report and skip, cancelling the dialog by button and by Escape with focus returning, reporting someone who left first, three reporters blocking a fourth window, the rules and the people-here line, "nobody else is online", and the closed and full screens.
+- Bug-injection check: 40 deliberate bugs in the M7 code, all caught.
+- Looked at by eye (screenshots at 1280×800 and 390×780): landing page with rules, call screen with the Report button, the dialog, the waiting screen with the thank-you, the "Reported" state.
+- Web bundle after dropping the unused validation library: 285 KB, 89 KB compressed (was 365 KB, 111 KB).
+- **Not verified:**
+  - anything on the live site: M7 is not deployed;
+  - real phones: the dialog, and typing with the on-screen keyboard open;
+  - a screen reader. Keyboard use was tested for the dialog only;
+  - whether three reporters in fifteen minutes is the right threshold. That needs real use.
+
+## Test evidence (M6, after the fix was deployed, 2026-11-16)
+- **Reported by the user on the live site:** M6-1 (Wi-Fi off for 3 s), M6-2 (Wi-Fi to mobile data) and M6-3 (30-second drop) **passed**. No timings or per-device details were given.
+- **Not verified:** M6-5, a server restart while people are online. The user plans to do it later. The same code path (coming back as a brand-new connection) is covered by automated tests and by M6-3, but a real restart on Render has not been watched.
 
 ## Test evidence (M6, after the first manual tests, 2026-11-16)
 - **Reported by the user on the live site:** M6-1 (Wi-Fi off for 3 s) and M6-2 (Wi-Fi to mobile data) **failed**: the "Reconnecting…" banner appeared, then the start page with "Your connection dropped, so the chat ended." M6-4 (closing the tab) passed. M6-3 and M6-5 were not reported.
@@ -158,13 +184,13 @@ Status words: Implemented / Tested / Partially tested / Untested / Needs manual 
 - The wake-up job's time (`wake-server.yml`) and the opening hours (`render.yaml`) are set in two places and must be changed together.
 - Two windows on one laptop share one microphone and speaker, so testing that way echoes unless you wear headphones.
 - Opening the dev site from another device (phone on the same Wi-Fi) is refused by the server's CORS rule until `CORS_ORIGIN` in `apps/server/.env` includes that address. Covered in the M4 manual-test checklist.
-- The web bundle is about 108 KB compressed, partly because the validation library (zod) is bundled although the browser doesn't use it yet. To trim in M7.
-- The landing page doesn't show the "online" number yet, although the server now sends it every 15 s (M7).
+- **Reports cannot stop a determined offender.** Without accounts, reloading the page clears a cooldown (D-045). If reports turn out to be frequent, the real fix is a BITS email sign-in.
+- The landing page makes no statement about age. Whether to add one is an open decision for the user (D-046).
+- The people-here number includes people who are only looking at the landing page.
 - When someone vanishes for good (laptop lid closed, tab killed), their partner now sees a frozen picture for up to 10 s longer than before (D-038). Leaving the page normally is still immediate.
 - Chat and call-setup messages stay in the server's memory for up to about 90 s so they can be replayed after a reconnect. They are never written to disk or logged.
 - With only two people online, skipping each other re-pairs them immediately (D-020, by design for now).
 - ⚠️ **Leaked secret in old code:** `reference/omegle_2077…/web/.env.local` contains a real ZegoCloud server secret (it was also exposed to browsers through a `NEXT_PUBLIC_` variable). **Action for the user:** rotate it or delete that ZegoCloud project. Since M0, `.gitignore` excludes `reference/**/.env*` and the zip; a `git add` dry run confirmed no env file, zip or `node_modules` would be staged.
-- **Live site today:** a call does not survive a real Wi-Fi drop or network switch (D-042). Fixed in the working tree, not deployed.
 - A drop longer than about 15 s can still end the call even if the person returns within the server's waiting time, because Socket.IO can only replay messages it still remembers. Acceptable for now.
 - Render free tier handled 300 simulated people (D-043). A real crowd arriving within one minute has not been simulated.
 - **The Cloudflare relay is live and has no spending cap** (1,000 GB a month included, then $0.05 per GB, D-037). Check that the $1 budget alert exists (DEPLOYMENT part 1, step 4). Video is now capped at 600 kbit/s; the automatic cut-off is deferred (D-040).

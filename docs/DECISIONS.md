@@ -303,7 +303,7 @@ _(Node version detail refined in D-018: ≥22.12 locally, 24 LTS in production.)
 - **Also:** the web app now retries every 0.5 to 2 s after a drop (Socket.IO's default grows to 5 s), so less of the grace period is wasted.
 - **Tests now simulate drops the realistic way** (server not told), in the server tests and in real browser windows. With the fix removed, 3 server tests and 3 browser tests fail.
 - **Lesson:** a simulated failure has to fail the way the real thing does. "Both ends closed" was a convenient shortcut that tested a case real networks rarely produce.
-- **Still to confirm:** M6-1 and M6-2 again on the live site once this is deployed.
+- **Confirmed (2026-11-16):** after deployment the user repeated M6-1 and M6-2 on the live site and both passed, as did M6-3.
 
 ## D-043 — Render's free plan is enough for 300 people at once (M6)
 *Accepted · 2026-11-16 · answers the "revisit" question in D-009*
@@ -315,3 +315,30 @@ _(Node version detail refined in D-018: ≥22.12 locally, 24 LTS in production.)
 - **Limits of this test:** pretend users are steadier than a real crowd arriving in one minute; it ran for two minutes, not a whole evening.
 - **Seen in passing:** with one idle visitor the log sometimes shows a single pause of about 190 ms in a minute (`loopDelayMaxMs`), while the p99 stays at 1 ms. Most likely the shared free machine or memory clean-up. Too rare and too short to notice; worth a second look only if it grows.
 - **Revisit when:** the stats line shows `loopDelayP99Ms` above about 100 during real use, or peak attendance passes about 300.
+
+## D-044 — Report and skip (M7)
+*Accepted · 2026-11-16*
+- **Decision:** one button that reports the partner and moves on. It needs a reason from a fixed list; the two are never paired again; the reported person is not told.
+- **Someone who left first can still be reported.** People who misbehave often skip straight away. The server remembers each connection's last chat, so that chat can be reported from the "Stranger moved on" screen.
+- **Membership is checked by the server.** A report must name the reporter's current or last chat. Nobody can report a person they were not matched with.
+- **No free text.** A reason from a list is enough to count problems, and it keeps what we store to ids and one word. Free text would be content we must never log (hard rule 6).
+- **The reported person sees an ordinary skip** (`partner_next`). Telling them invites retaliation in the few seconds they might still share a call with someone.
+- **A dialog between the button and the report** asks for the reason and prevents reporting by a slip of the finger.
+- **The avoid list lasts as long as both connections do.** It is not stored anywhere else.
+- **Records go to the server log** through `ModerationSink` (the extension point for a database later).
+
+## D-045 — Cooldown after several reports, and what it can't do (M7)
+*Accepted · 2026-11-16 · numbers are first guesses*
+- **Decision:** 3 different reporters within 15 minutes → the reported connection is removed from any queue or chat and refused matches for 10 minutes.
+- **Why different reporters:** otherwise one person could block anyone. Each reporter must have been matched with the person, so a group cannot report someone they never met.
+- **Honest limit:** without accounts, reloading the page gives a clean record. The cooldown slows a careless offender and shows the behaviour was noticed. It does not stop a determined one.
+- **What would:** identity. The cheapest form here is a BITS email sign-in (D-012 kept the site open on purpose). **Recommendation:** watch the `moderation: report` lines in the log after launch. If reports are frequent, adding the email gate is the next step, not a more elaborate cooldown.
+- **Rejected:** blocking by IP address (the campus shares a few addresses, D-013); storing a "blocked" flag in the browser (cleared by a private window).
+
+## D-046 — M7 polish decisions
+*Accepted · 2026-11-16*
+- **Rules on the landing page:** four short lines and "By pressing Start you agree to follow these rules." **No age statement yet:** whether to say "18+" is the user's decision (open question in TODO.md).
+- **"N people here right now"** counts everyone connected, including people still on the landing page. It sets expectations ("you're the only one here") more than it measures anything.
+- **No bottom-sheet chat on phones.** The stacked layout (video on top, chat underneath) was confirmed on a real phone in M5-5. A sliding sheet would be new behaviour to get wrong for little gain.
+- **The validation library is no longer shipped to browsers.** `packages/shared` is marked `"sideEffects": false`, which lets the bundler drop the schema module the web app never uses. Web bundle: 111 KB → 89 KB compressed. Consequence: modules in `shared` must not do anything at import time except define things.
+- **A second test server for the "closed" and "full" screens.** Those screens need a server in that state, and the web app's server address is fixed when it is built, so the browser tests start a second server and a second copy of the app.
